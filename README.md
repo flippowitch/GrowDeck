@@ -3,7 +3,7 @@
 **One self-hosted dashboard for your grow tents – Spider Farmer, Vivosun and AC Infinity together.**
 
 [![Live demo](https://img.shields.io/badge/live%20demo-open-2e7d4f)](https://flippowitch.github.io/GrowDeck/)
-[![CI](https://github.com/YOUR-GITHUB-USER/growdeck/actions/workflows/ci.yml/badge.svg)](https://github.com/flippowitch/GrowDeck/actions/workflows/ci.yml)
+[![CI](https://github.com/flippowitch/GrowDeck/actions/workflows/ci.yml/badge.svg)](https://github.com/flippowitch/GrowDeck/actions/workflows/ci.yml)
 ![Docker](https://img.shields.io/badge/runs%20on-Docker-2496ed)
 ![Languages](https://img.shields.io/badge/UI-English%20%7C%20Deutsch-555)
 
@@ -17,7 +17,7 @@ reminders, daily photos with time-lapse, an archive of finished grows and nightl
 backups. It runs as a Docker project on a NAS (built for UGREEN UGOS Pro) or any Linux
 box, and speaks English and German.
 
-**[▶ Try the live demo](https://YOUR-GITHUB-USER.github.io/growdeck/)** – it runs entirely in
+**[▶ Try the live demo](https://flippowitch.github.io/GrowDeck/)** – it runs entirely in
 your browser with simulated devices; nothing is sent anywhere, and a reload resets it.
 
 ![Overview](docs/screenshots/overview.webp)
@@ -142,7 +142,7 @@ and outputs; rules, alarms, history and the UI only work with that model.
 ### Quick start (any Docker host)
 
 ```sh
-git clone https://github.com/YOUR-GITHUB-USER/growdeck.git
+git clone https://github.com/flippowitch/growdeck.git
 cd growdeck
 cp .env.example .env          # then edit .env – at least APP_PASSWORD
 sudo docker compose up -d --build
