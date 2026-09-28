@@ -1,0 +1,523 @@
+"""Vivosun REST API bootstrap client."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
+
+import aiohttp
+
+from .const import (
+    API_AWS_IDENTITY_PATH,
+    API_BASE_URL,
+    API_DEVICE_LIST_PATH,
+    API_LOGIN_PATH,
+    API_PLAN_STAGE_INFO_PATH,
+    API_POINT_LOG_PATH,
+    API_PROTOCOL_VERSION,
+    API_REQUEST_TIMEOUT_SECONDS,
+    APP_VERSION,
+    SENSOR_KEY_BOX_HUMI,
+    SENSOR_KEY_BOX_TEMP,
+    SENSOR_KEY_BOX_VPD,
+    SENSOR_KEY_CORE_TEMP,
+    SENSOR_KEY_INSIDE_HUMI,
+    SENSOR_KEY_INSIDE_TEMP,
+    SENSOR_KEY_INSIDE_VPD,
+    SENSOR_KEY_OUTSIDE_HUMI,
+    SENSOR_KEY_OUTSIDE_TEMP,
+    SENSOR_KEY_OUTSIDE_VPD,
+    SENSOR_KEY_PROBE_HUMI,
+    SENSOR_KEY_PROBE_TEMP,
+    SENSOR_KEY_PROBE_VPD,
+    SENSOR_KEY_RSSI,
+    SENSOR_KEY_WATER_LEVEL,
+    SENSOR_UNAVAILABLE_SENTINEL,
+    SERVER_PLATFORM,
+)
+from .encryption import encrypt_request_body
+from .exceptions import VivosunAuthError, VivosunConnectionError, VivosunResponseError
+from .models import AuthTokens, AwsIdentity, DeviceInfo, PlanStageInfo, client_model_token, infer_device_type
+from .redaction import redact_identifier, sanitize_mapping_for_debug
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+_LOGGER = logging.getLogger(__name__)
+_AUTH_MESSAGE_MARKERS = ("auth", "credential", "forbidden", "invalid", "login", "password", "token", "unauthorized")
+_SP_APP_ID = "com.vivosun.android"
+_NO_SCENE_DEVICE_TYPES = frozenset({"curing_box", "outlet"})
+
+
+class VivosunApiClient:
+    """aiohttp-based REST API client for Vivosun cloud bootstrap calls."""
+
+    def __init__(self, session: aiohttp.ClientSession, *, base_url: str = API_BASE_URL) -> None:
+        """Initialize API client with shared aiohttp session."""
+        self._session = session
+        self._base_url = base_url.rstrip("/")
+        self._timeout = aiohttp.ClientTimeout(total=API_REQUEST_TIMEOUT_SECONDS)
+        self._skipped_devices: list[dict[str, object]] = []
+
+    @property
+    def skipped_devices(self) -> list[dict[str, object]]:
+        """Return rejected getTotalList entries from the last discovery call."""
+        return [dict(entry) for entry in self._skipped_devices]
+
+    async def login(self, email: str, password: str) -> AuthTokens:
+        """Authenticate with Vivosun and return account tokens."""
+        _LOGGER.info("Logging in to Vivosun API")
+        payload: dict[str, str] = {
+            "email": email,
+            "password": password,
+            "spAppId": _SP_APP_ID,
+            "spClientId": str(uuid4()),
+            "spSessionId": str(uuid4()),
+        }
+        data = await self._request_json("POST", API_LOGIN_PATH, json_body=payload)
+
+        tokens = AuthTokens(
+            access_token=self._expect_str(data, "accessToken"),
+            login_token=self._expect_str(data, "loginToken"),
+            refresh_token=self._expect_str(data, "refreshToken"),
+            user_id=self._expect_str(data, "userId"),
+        )
+        _LOGGER.debug("Login succeeded for user_id=%s", redact_identifier(tokens.user_id))
+        return tokens
+
+    async def get_devices(self, tokens: AuthTokens) -> list[DeviceInfo]:
+        """Fetch account devices from getTotalList (all categories)."""
+        _LOGGER.info("Fetching Vivosun devices")
+        data = await self._request_json("GET", API_DEVICE_LIST_PATH, headers=self._auth_headers(tokens))
+        device_group = self._expect_mapping(data, "deviceGroup")
+
+        devices: list[DeviceInfo] = []
+        self._skipped_devices = []
+        for category_key, category_devices in device_group.items():
+            if not isinstance(category_devices, list):
+                continue
+            for index, item in enumerate(category_devices):
+                device = self._expect_mapping_item(item, f"deviceGroup.{category_key}[{index}]")
+                device_info = self._parse_device_entry(device, category_key=category_key, index=index)
+                if device_info is None:
+                    continue
+                devices.append(device_info)
+
+        _LOGGER.debug("Fetched %d devices", len(devices))
+        return devices
+
+    def _parse_device_entry(
+        self,
+        device: Mapping[str, object],
+        *,
+        category_key: str,
+        index: int,
+    ) -> DeviceInfo | None:
+        """Parse a device entry, skipping unsupported/non-IoT categories safely."""
+        name = self._optional_str(device, "name")
+        if name is None:
+            self._track_skipped_device(device, category_key=category_key, index=index, missing_fields=("name",))
+            return None
+
+        device_id = self._optional_str(device, "deviceId")
+        client_id = self._optional_str(device, "clientId")
+        topic_prefix = self._optional_str(device, "topicPrefix")
+        device_type = infer_device_type(name, client_id or "")
+        scene_id = self._optional_scene_id(device)
+        supports_point_log = scene_id is not None or device_type in _NO_SCENE_DEVICE_TYPES
+        camera_username, camera_password = self._extract_camera_credentials(device)
+
+        if device_type == "unknown" and (camera_username is not None or camera_password is not None):
+            device_type = "camera"
+
+        missing_fields: list[str] = []
+        if device_id is None:
+            missing_fields.append("deviceId")
+        if scene_id is None and device_type not in _NO_SCENE_DEVICE_TYPES and device_type != "camera":
+            missing_fields.append("sceneId")
+        if device_type != "camera":
+            if client_id is None:
+                missing_fields.append("clientId")
+            if topic_prefix is None:
+                missing_fields.append("topicPrefix")
+        if missing_fields:
+            self._track_skipped_device(
+                device,
+                category_key=category_key,
+                index=index,
+                missing_fields=tuple(missing_fields),
+            )
+            return None
+
+        return DeviceInfo(
+            device_id=device_id or "",
+            client_id=client_id or "",
+            topic_prefix=topic_prefix or "",
+            name=name,
+            online=self._optional_int(device, "onlineStatus", default=0) == 1,
+            scene_id=scene_id or 0,
+            device_type=device_type,
+            camera_username=camera_username,
+            camera_password=camera_password,
+            supports_point_log=supports_point_log,
+        )
+
+    def _extract_camera_credentials(self, device: Mapping[str, object]) -> tuple[str | None, str | None]:
+        """Extract camera LAN credentials from setting.jf when present."""
+        setting = device.get("setting")
+        if not isinstance(setting, Mapping):
+            return None, None
+        jf = setting.get("jf")
+        if not isinstance(jf, Mapping):
+            return None, None
+        username = jf.get("devUser")
+        password = jf.get("devPass")
+        return (
+            username if isinstance(username, str) and username else None,
+            password if isinstance(password, str) and password else None,
+        )
+
+    def _log_skipped_device(self, device: Mapping[str, object], *, category_key: str, index: int) -> None:
+        """Log a skipped device entry without crashing account bootstrap."""
+        _LOGGER.debug(
+            "Skipping deviceGroup.%s[%d] because required fields are missing: %s",
+            category_key,
+            index,
+            sanitize_mapping_for_debug(dict(device)),
+        )
+
+    def _track_skipped_device(
+        self,
+        device: Mapping[str, object],
+        *,
+        category_key: str,
+        index: int,
+        missing_fields: tuple[str, ...],
+    ) -> None:
+        """Record and log a skipped getTotalList entry for diagnostics."""
+        client_id = self._optional_str(device, "clientId") or ""
+        self._skipped_devices.append(
+            {
+                "device_group": category_key,
+                "index": index,
+                "available_keys": sorted(str(key) for key in device),
+                "model_token": client_model_token(client_id) if client_id else "",
+                "missing_fields": list(missing_fields),
+                "raw": sanitize_mapping_for_debug(dict(device)),
+            }
+        )
+        self._log_skipped_device(device, category_key=category_key, index=index)
+
+    async def get_aws_identity(self, tokens: AuthTokens, aws_identity_id: str = "") -> AwsIdentity:
+        """Fetch AWS identity payload used for Cognito exchange in later phases."""
+        _LOGGER.info("Fetching Vivosun AWS identity")
+        payload = {"awsIdentityId": aws_identity_id, "attachPolicy": True}
+        data = await self._request_json(
+            "POST",
+            API_AWS_IDENTITY_PATH,
+            headers=self._auth_headers(tokens),
+            json_body=payload,
+        )
+
+        aws_identity = AwsIdentity(
+            aws_host=self._expect_str(data, "awsHost"),
+            aws_region=self._expect_str(data, "awsRegion"),
+            aws_identity_id=self._expect_str(data, "awsIdentityId"),
+            aws_open_id_token=self._expect_str(data, "awsOpenIdToken"),
+            aws_port=self._expect_int(data, "awsPort"),
+        )
+        _LOGGER.debug(
+            "Fetched AWS identity payload: %s",
+            sanitize_mapping_for_debug(
+                {
+                    "awsHost": aws_identity.aws_host,
+                    "awsRegion": aws_identity.aws_region,
+                    "awsIdentityId": aws_identity.aws_identity_id,
+                    "awsOpenIdToken": aws_identity.aws_open_id_token,
+                    "awsPort": aws_identity.aws_port,
+                }
+            ),
+        )
+        return aws_identity
+
+    async def get_point_log(
+        self,
+        tokens: AuthTokens,
+        device: DeviceInfo,
+        *,
+        start_time: int,
+        end_time: int,
+    ) -> dict[str, int | None]:
+        """Fetch recent point-log entries and return the latest sensor snapshot."""
+        payload = {
+            "sceneId": device.scene_id,
+            "deviceId": device.device_id,
+            "startTime": start_time,
+            "endTime": end_time,
+            "reportType": 0,
+            "orderBy": "asc",
+            "timeLevel": "ONE_MINUTE",
+        }
+        data = await self._request_json(
+            "POST",
+            API_POINT_LOG_PATH,
+            headers=self._auth_headers(tokens),
+            json_body=payload,
+        )
+        entries = self._expect_sequence(data, "iotDataLogList")
+        if not entries:
+            return {}
+
+        latest = self._expect_mapping_item(entries[-1], "iotDataLogList[-1]")
+        snapshot: dict[str, int | None] = {}
+        for key in (
+            SENSOR_KEY_INSIDE_TEMP,
+            SENSOR_KEY_INSIDE_HUMI,
+            SENSOR_KEY_INSIDE_VPD,
+            SENSOR_KEY_OUTSIDE_TEMP,
+            SENSOR_KEY_OUTSIDE_HUMI,
+            SENSOR_KEY_OUTSIDE_VPD,
+            SENSOR_KEY_BOX_TEMP,
+            SENSOR_KEY_BOX_HUMI,
+            SENSOR_KEY_BOX_VPD,
+            SENSOR_KEY_PROBE_TEMP,
+            SENSOR_KEY_PROBE_HUMI,
+            SENSOR_KEY_PROBE_VPD,
+            SENSOR_KEY_WATER_LEVEL,
+            SENSOR_KEY_CORE_TEMP,
+            SENSOR_KEY_RSSI,
+        ):
+            snapshot[key] = self._optional_sensor_int(latest, key)
+        return snapshot
+
+    async def get_point_log_raw(
+        self,
+        tokens: AuthTokens,
+        device: DeviceInfo,
+        *,
+        start_time: int,
+        end_time: int,
+    ) -> dict[str, object]:
+        """Return the newest raw point-log row (all keys), or {} when empty.
+
+        GrowDeck addition: unlike get_point_log this keeps every key so that
+        telemetry of newer models (curing box, probes, ...) is not dropped.
+        """
+        payload: dict[str, object] = {
+            "deviceId": device.device_id,
+            "startTime": start_time,
+            "endTime": end_time,
+            "reportType": 0,
+            "orderBy": "asc",
+            "timeLevel": "ONE_MINUTE",
+        }
+        if device.scene_id:
+            payload["sceneId"] = device.scene_id
+        data = await self._request_json(
+            "POST",
+            API_POINT_LOG_PATH,
+            headers=self._auth_headers(tokens),
+            json_body=payload,
+        )
+        entries = data.get("iotDataLogList")
+        if not isinstance(entries, list) or not entries:
+            return {}
+        latest = entries[-1]
+        return dict(latest) if isinstance(latest, dict) else {}
+
+    async def get_plan_stage_info(self, tokens: AuthTokens, stage_id: str) -> PlanStageInfo | None:
+        """Fetch plan stage details from iot/plan/stageInfo."""
+        try:
+            data = await self._request_json(
+                "POST",
+                API_PLAN_STAGE_INFO_PATH,
+                headers=self._auth_headers(tokens),
+                json_body={"userPlanStageId": stage_id},
+            )
+        except (VivosunResponseError, VivosunConnectionError):
+            _LOGGER.debug("Failed to fetch plan stage info for stage_id=%s", stage_id)
+            return None
+
+        stage_name = self._optional_str(data, "stageName") or "Unknown"
+        icon = self._optional_str(data, "icon") or ""
+        content_str = self._optional_str(data, "planStageContent")
+        content: dict[str, object] = {}
+        if content_str:
+            try:
+                import json as json_mod
+                parsed = json_mod.loads(content_str)
+                if isinstance(parsed, dict):
+                    content = parsed
+            except (ValueError, TypeError):
+                pass
+        return PlanStageInfo(stage_name=stage_name, icon=icon, content=content)
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        json_body: Mapping[str, object] | None = None,
+    ) -> Mapping[str, object]:
+        """Call endpoint and return validated envelope data payload."""
+        url = f"{self._base_url}{path}"
+        request_headers = self._base_headers()
+        if headers is not None:
+            request_headers.update(headers)
+        request_kwargs: dict[str, Any] = {"timeout": self._timeout, "headers": request_headers}
+
+        if json_body is not None:
+            plaintext = json.dumps(dict(json_body), separators=(",", ":")).encode()
+            # The cloud requires production POST bodies to be encrypted; login is
+            # the one POST exempted (it must work before encryption keys exist).
+            if method.upper() == "POST" and path != API_LOGIN_PATH:
+                request_time, request_code, body = encrypt_request_body(
+                    plaintext, timestamp_ms=int(time.time() * 1000)
+                )
+                request_headers["Request-Time"] = request_time
+                request_headers["Request-Code"] = request_code
+            else:
+                body = plaintext
+            request_headers["Content-Type"] = "application/json"
+            request_kwargs["data"] = body
+
+        try:
+            async with self._session.request(method, url, **request_kwargs) as response:
+                payload = await self._read_json_payload(response)
+                return self._parse_envelope(payload, status=response.status)
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise VivosunConnectionError(f"Vivosun API request failed for {path}") from err
+
+    async def _read_json_payload(self, response: aiohttp.ClientResponse) -> Mapping[str, object]:
+        """Read and validate JSON body as a mapping."""
+        try:
+            payload = await response.json(content_type=None)
+        except (aiohttp.ContentTypeError, ValueError) as err:
+            if response.status in (401, 403):
+                raise VivosunAuthError(f"Authentication failed with HTTP {response.status}") from err
+            raise VivosunResponseError("Response body is not valid JSON") from err
+
+        if not isinstance(payload, dict):
+            raise VivosunResponseError("Response JSON root must be an object")
+        return payload
+
+    def _parse_envelope(self, payload: Mapping[str, object], *, status: int) -> Mapping[str, object]:
+        """Parse standard Vivosun response envelope and return data mapping."""
+        if status in (401, 403):
+            raise VivosunAuthError(f"Authentication failed with HTTP {status}")
+
+        success = self._expect_bool(payload, "success")
+        message = self._expect_str(payload, "message")
+
+        if not success:
+            if self._is_auth_failure(message):
+                raise VivosunAuthError(f"Authentication failed: {message}")
+            raise VivosunResponseError(f"Vivosun API error: {message}")
+
+        data = self._expect_mapping(payload, "data")
+        return data
+
+    def _base_headers(self) -> dict[str, str]:
+        """Headers the official app sends on every request (mirrors its client)."""
+        return {
+            "Server-Platform": SERVER_PLATFORM,
+            "Api-Version": API_PROTOCOL_VERSION,
+            "App-Version": APP_VERSION,
+        }
+
+    def _auth_headers(self, tokens: AuthTokens) -> dict[str, str]:
+        """Build auth headers for authenticated endpoints."""
+        return {
+            "login-token": tokens.login_token,
+            "access-token": tokens.access_token,
+        }
+
+    def _is_auth_failure(self, message: str) -> bool:
+        """Best-effort auth failure detection from envelope message content."""
+        lowered = message.lower()
+        return any(marker in lowered for marker in _AUTH_MESSAGE_MARKERS)
+
+    def _expect_mapping(self, payload: Mapping[str, object], key: str) -> Mapping[str, object]:
+        value = payload.get(key)
+        if not isinstance(value, dict):
+            raise VivosunResponseError(f"Expected object at '{key}'")
+        return value
+
+    def _expect_mapping_item(self, payload: object, context: str) -> Mapping[str, object]:
+        if not isinstance(payload, dict):
+            raise VivosunResponseError(f"Expected object at '{context}'")
+        return payload
+
+    def _expect_sequence(self, payload: Mapping[str, object], key: str) -> Sequence[object]:
+        value = payload.get(key)
+        if not isinstance(value, list):
+            raise VivosunResponseError(f"Expected array at '{key}'")
+        return value
+
+    def _expect_str(self, payload: Mapping[str, object], key: str) -> str:
+        value = payload.get(key)
+        if not isinstance(value, str):
+            raise VivosunResponseError(f"Expected string at '{key}'")
+        return value
+
+    def _optional_str(self, payload: Mapping[str, object], key: str) -> str | None:
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+        return None
+
+    def _expect_int(self, payload: Mapping[str, object], key: str) -> int:
+        value = payload.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise VivosunResponseError(f"Expected integer at '{key}'")
+        return value
+
+    def _optional_int(self, payload: Mapping[str, object], key: str, *, default: int) -> int:
+        """Extract an int field, returning *default* when the key is absent or null."""
+        value = payload.get(key)
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                pass
+        return default
+
+    def _expect_bool(self, payload: Mapping[str, object], key: str) -> bool:
+        value = payload.get(key)
+        if not isinstance(value, bool):
+            raise VivosunResponseError(f"Expected boolean at '{key}'")
+        return value
+
+    def _expect_scene_id(self, payload: Mapping[str, object]) -> int:
+        scene = payload.get("scene")
+        if not isinstance(scene, dict):
+            raise VivosunResponseError("Expected object at 'scene'")
+        return self._expect_int(scene, "sceneId")
+
+    def _optional_scene_id(self, payload: Mapping[str, object]) -> int | None:
+        scene = payload.get("scene")
+        if not isinstance(scene, dict):
+            return None
+        scene_id = scene.get("sceneId")
+        if isinstance(scene_id, bool):
+            return None
+        if isinstance(scene_id, int):
+            return scene_id
+        return None
+
+    def _optional_sensor_int(self, payload: Mapping[str, object], key: str) -> int | None:
+        value = self._optional_int(payload, key, default=SENSOR_UNAVAILABLE_SENTINEL)
+        if value == SENSOR_UNAVAILABLE_SENTINEL:
+            return None
+        return value

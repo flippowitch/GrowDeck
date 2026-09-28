@@ -1,0 +1,77 @@
+# GrowDeck for UGREEN NAS (UGOS Pro) and any other Docker host.
+# Settings come from the file ".env" next to this file (see .env.example).
+name: growdeck
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: growdeck-mosquitto
+    restart: unless-stopped
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      # Spider Farmer modules connect here. The spiderproxy listens on 8883
+      # inside this container's network (see below).
+      - "8883:8883"
+    # Public resolvers so the proxy always finds the real Spider Farmer cloud,
+    # even when your home network redirects sf.mqtt.spider-farmer.com to the NAS.
+    dns:
+      - 1.1.1.1
+      - 9.9.9.9
+
+  spiderproxy:
+    build:
+      context: ./docker/spiderproxy
+    container_name: growdeck-spiderproxy
+    restart: unless-stopped
+    # The proxy only talks to 127.0.0.1, so it shares Mosquitto's network.
+    network_mode: "service:mosquitto"
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_PORT: "1883"
+
+  growdeck:
+    build: .
+    container_name: growdeck
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    ports:
+      - "${GROWDECK_PORT:-8080}:8080"
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      TZ: ${TZ:-Europe/Berlin}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      SPIDERFARMER_ENABLED: ${SPIDERFARMER_ENABLED:-true}
+      VIVOSUN_EMAIL: ${VIVOSUN_EMAIL:-}
+      VIVOSUN_PASSWORD: ${VIVOSUN_PASSWORD:-}
+      ACINFINITY_EMAIL: ${ACINFINITY_EMAIL:-}
+      ACINFINITY_PASSWORD: ${ACINFINITY_PASSWORD:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      HISTORY_INTERVAL_SECONDS: ${HISTORY_INTERVAL_SECONDS:-60}
+      RETENTION_DAYS: ${RETENTION_DAYS:-90}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GD_LANGUAGE: ${GD_LANGUAGE:-de}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ${GROWDECK_DATA:-./data}:/data
+
+  # Optional: DNS server for networks whose router cannot redirect
+  # sf.mqtt.spider-farmer.com (e.g. Fritz!Box). Enable with
+  # COMPOSE_PROFILES=dns in .env and set NAS_IP.
+  dns:
+    build:
+      context: ./docker/dnsmasq
+    container_name: growdeck-dns
+    restart: unless-stopped
+    profiles: ["dns"]
+    environment:
+      NAS_IP: ${NAS_IP:-}
+      DNS_UPSTREAM_1: ${DNS_UPSTREAM_1:-1.1.1.1}
+      DNS_UPSTREAM_2: ${DNS_UPSTREAM_2:-9.9.9.9}
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"

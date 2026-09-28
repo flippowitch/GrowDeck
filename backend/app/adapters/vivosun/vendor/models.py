@@ -1,0 +1,105 @@
+"""Data models for the Vivosun GrowHub integration."""
+
+from __future__ import annotations
+
+import re
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .coordinator import VivosunCoordinator
+
+
+@dataclass(slots=True)
+class RuntimeData:
+    """Runtime data container for a config entry."""
+
+    entry_id: str
+    coordinator: VivosunCoordinator | None = None
+    devices: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class DeviceIdentifiers:
+    """Baseline identifiers for GrowHub devices."""
+
+    device_id: str
+    client_id: str
+    topic_prefix: str
+
+
+@dataclass(slots=True, frozen=True)
+class AuthTokens:
+    """Authentication tokens returned by the Vivosun login endpoint."""
+
+    access_token: str
+    login_token: str
+    refresh_token: str
+    user_id: str
+
+
+@dataclass(slots=True, frozen=True)
+class DeviceInfo:
+    """Device entry parsed from getTotalList endpoint."""
+
+    device_id: str
+    client_id: str
+    topic_prefix: str
+    name: str
+    online: bool
+    scene_id: int
+    device_type: str = "unknown"
+    camera_username: str | None = None
+    camera_password: str | None = None
+    supports_point_log: bool = True
+
+
+def infer_device_type(name: str, client_id: str = "") -> str:
+    """Infer device type from stable model tokens and friendly-name hints."""
+    combined = f"{name} {client_id}".lower()
+    model_token = client_model_token(client_id)
+    # GrowHub A10/A22 smart plugs ("GrowHub Outlet Controller"): before the controllers
+    if (re.search(r"A(10|22)S?$|OUTLET|PLUG|OTL", model_token) or
+            re.search(r"\b(a10|a22s?|outlet|smart plug|steckdose)\b", combined)):
+        return "outlet"
+    if model_token.startswith("VSCTL") or "growhub" in combined or "controller" in combined:
+        return "controller"
+    if model_token.startswith("VSDRY") or "aerodrain" in combined or "dehumidifier" in combined:
+        return "dehumidifier"
+    if model_token.startswith(("VSHMD", "VSHUM")) or "aerostream" in combined or "humidifier" in combined:
+        return "humidifier"
+    if model_token.startswith("VSHT") or "aeroflux" in combined or "heater" in combined:
+        return "heater"
+    if "growcam" in combined or "camera" in combined:
+        return "camera"
+    if model_token.startswith("VSCB") or "vcure" in combined:
+        return "curing_box"
+    return "unknown"
+
+
+def client_model_token(client_id: str) -> str:
+    parts = client_id.split("-")
+    if len(parts) >= 2:
+        return parts[1].upper()
+    return client_id.upper()
+
+
+@dataclass(slots=True, frozen=True)
+class PlanStageInfo:
+    """Plan stage details fetched from iot/plan/stageInfo."""
+
+    stage_name: str
+    icon: str
+    content: dict[str, object]
+
+
+@dataclass(slots=True, frozen=True)
+class AwsIdentity:
+    """AWS IoT identity payload parsed from awsIdentity endpoint."""
+
+    aws_host: str
+    aws_region: str
+    aws_identity_id: str
+    aws_open_id_token: str
+    aws_port: int

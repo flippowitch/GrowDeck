@@ -1,0 +1,560 @@
+"""Vendored from dalinicus/homeassistant-acinfinity (MIT, see LICENSE),
+commit 4134e959e146630eea70897d79ffb6157972537b. Modification: Home Assistant imports removed,
+asyncio.timeout replaces the async-timeout package, own exception base class."""
+
+
+MANUFACTURER = "AC Infinity"
+DOMAIN = "ac_infinity"
+HOST = "https://www.acinfinityserver.com"
+
+DEFAULT_POLLING_INTERVAL = 10
+ISSUE_URL = "https://github.com/dalinicus/homeassistant-acinfinity/issues/new?template=Blank+issue"
+
+class MdiIcon:
+    THERMOMETER_PLUS = "mdi:thermometer-plus"
+    CLOUD_PERCENT_OUTLINE = "mdi:cloud-percent-outline"
+    LEAF = "mdi:leaf"
+    KNOB = "mdi:knob"
+    WATER_THERMOMETER_OUTLINE = "mdi:water-thermometer-outline"
+    WATER_PERCENT = "mdi:water-percent"
+    WATER_THERMOMETER = "mdi:water-thermometer"
+    LIGHTBULB_ON_OUTLINE = "mdi:lightbulb-on-outline"
+    WATERING_CAN_OUTLINE = "mdi:watering-can-outline"
+    POWER_PLUG = "mdi:power-plug"
+    WAVES = "mdi:waves"
+    POWER = "mdi:power"
+    PH = "mdi:ph"
+    SINE_WAVE = "mdi:sine-wave"
+    WATER_OPACITY = "mdi:water-opacity"
+
+
+class ConfigurationKey:
+    POLLING_INTERVAL = "polling_interval"
+    UPDATE_PASSWORD = "update_password"
+    ENTITIES = "entities"
+    MODIFIED_AT = "modified_at"
+
+
+class EntityConfigValue:
+    ALL = "all"
+    SENSORS_AND_SETTINGS = "sensors_and_settings"
+    SENSORS_AND_CONTROLS = "sensors_and_controls"
+    SENSORS_ONLY = "sensors_only"
+    DISABLE = "disable"
+
+
+class CustomDevicePropertyKey:
+    # Derived sensors
+    NEXT_STATE_CHANGE = "nextStateChange"
+
+
+class AtType:
+    OFF = 1
+    ON = 2
+    AUTO = 3
+    TIMER_TO_ON = 4
+    TIMER_TO_OFF = 5
+    CYCLE = 6
+    SCHEDULE = 7
+    VPD = 8
+    CO2 = 9
+    CO2_FAN = 10
+    MOISTURE = 11
+    WATER_TEMP = 12
+    PH = 13
+    EC = 14
+    WATER_DETECT = 15
+
+
+
+# noinspection SpellCheckingInspection
+class ControllerPropertyKey:
+    # /api/dev/devInfoListAll
+    DEVICE_ID = "devId"
+    DEVICE_NAME = "devName"
+    DEVICE_CODE = "devCode"
+    MAC_ADDR = "devMacAddr"
+    DEVICE_INFO = "deviceInfo"
+    PORTS = "ports"
+    HW_VERSION = "hardwareVersion"
+    SW_VERSION = "firmwareVersion"
+    DEVICE_TYPE = "devType"
+    TEMPERATURE = "temperature"
+    HUMIDITY = "humidity"
+    VPD = "vpdnums"
+    ONLINE = "online"
+    TIME_ZONE = "zoneId"
+    SENSORS = "sensors"
+    PORT_COUNT = "devPortCount"
+
+
+class ControllerType:
+    UIS_69_PRO = 11
+    UIS_69_PRO_PLUS = 18
+    UIS_89_AI_PLUS = 20
+    UIS_OUTLET_AI = 21
+    UIS_OUTLET_AI_PLUS = 22
+
+
+AI_CONTROLLER_TYPES = frozenset({
+    ControllerType.UIS_89_AI_PLUS,
+    ControllerType.UIS_OUTLET_AI,
+    ControllerType.UIS_OUTLET_AI_PLUS
+})
+
+
+class SensorPropertyKey:
+    # /api/dev/devInfoListAll via "sensors" property
+    ACCESS_PORT = "accessPort"
+    SENSOR_TYPE = "sensorType"
+    SENSOR_UNIT = "sensorUnit"
+    SENSOR_PRECISION = "sensorPrecision"
+    SENSOR_DATA = "sensorData"
+
+
+class SensorType:
+    PROBE_TEMPERATURE_F = 0
+    PROBE_TEMPERATURE_C = 1
+    PROBE_HUMIDITY = 2
+    PROBE_VPD = 3
+    CONTROLLER_TEMPERATURE_F = 4
+    CONTROLLER_TEMPERATURE_C = 5
+    CONTROLLER_HUMIDITY = 6
+    CONTROLLER_VPD = 7
+    SOIL = 10
+    CO2 = 11
+    LIGHT = 12
+    HYDRO_PH = 13
+    HYDRO_EC_US = 14
+    HYDRO_EC_MS = 15
+    HYDRO_TDS_PPM = 16
+    HYDRO_TDS_PPT = 17
+    HYDRO_WATER_TEMPERATURE_F = 18
+    HYDRO_WATER_TEMPERATURE_C = 19
+    WATER = 20
+
+
+class SensorReferenceKey:
+    # Sensor keys for known sensor values; arbitrary values not tied to the API data model.
+    # Used to create unique keys for HASS entities.  Only valid for AI Controllers with the sensor usb ports.
+    PROBE_TEMPERATURE = "probeTemperature"
+    PROBE_HUMIDITY = "probeHumidity"
+    PROBE_VPD = "probeVaporPressureDeficit"
+    CONTROLLER_TEMPERATURE = "controllerTemperature"
+    CONTROLLER_HUMIDITY = "controllerHumidity"
+    CONTROLLER_VPD = "controllerVaporPressureDeficit"
+    CO2_SENSOR = "co2Sensor"
+    LIGHT_SENSOR = "lightSensor"
+    WATER = "waterSensor"
+    SOIL = "soilSensor"
+    HYDRO_PH = "hydroPh"
+    HYDRO_EC = "hydroEc"
+    HYDRO_TDS = "hydroTds"
+    HYDRO_WATER_TEMPERATURE = "hydroWaterTemperature"
+
+
+# noinspection SpellCheckingInspection
+class DevicePropertyKey:
+    # /api/dev/devInfoListAll via "ports" property
+    PORT = "port"
+    NAME = "portName"
+    SPEAK = "speak"
+    ONLINE = "online"
+    STATE = "loadState"
+    REMAINING_TIME = "remainTime"
+
+
+# noinspection SpellCheckingInspection
+class DeviceControlKey:
+    # /api/dev/getdevModeSettingsList
+    # /api/dev/addDevMode
+    DEV_ID = "devId"
+    EXTERNAL_PORT = "externalPort"
+    MODE_SET_ID = "modeSetid"
+    MODE_TYPE = "modeType"
+    MASTER_PORT = "masterPort"
+    SURPLUS = "surplus"
+    ON_SPEED = "onSpead"
+    OFF_SPEED = "offSpead"
+    ON_SELF_SPEED = "onSelfSpead"
+    AT_TYPE = "atType"
+    POWER_STATE = "powerState"
+    POWER = "power"
+    LOAD_STATE = "loadState"
+    LOAD_TYPE = "loadType"
+    SPEAK = "speak"
+    ABNORMAL_STATE = "abnormalState"
+    TOWARD = "toward"
+    SCHEDULED_START_TIME = "schedStartTime"
+    SCHEDULED_END_TIME = "schedEndtTime"
+    TIMER_DURATION_TO_ON = "acitveTimerOn"
+    TIMER_DURATION_TO_OFF = "acitveTimerOff"
+    CYCLE_DURATION_ON = "activeCycleOn"
+    CYCLE_DURATION_OFF = "activeCycleOff"
+    VPD_HIGH_ENABLED = "activeHtVpd"
+    VPD_HIGH_TRIGGER = "activeHtVpdNums"
+    VPD_LOW_ENABLED = "activeLtVpd"
+    VPD_LOW_TRIGGER = "activeLtVpdNums"
+    VPD_STATUS = "vpdstatus"
+    VPD_NUMS = "vpdnums"
+    VPD_SETTING_MODE = "vpdSettingMode"
+    TARGET_VPD = "targetVpd"
+    TARGET_VPD_SWITCH = "targetVpdSwitch"
+    IS_UPDATE_VPD_NUMS = "isUpdateVpdNums"
+    AUTO_TEMP_HIGH_TRIGGER = "devHt"
+    AUTO_TEMP_HIGH_ENABLED = "activeHt"
+    AUTO_TEMP_LOW_TRIGGER = "devLt"
+    AUTO_TEMP_LOW_ENABLED = "activeLt"
+    TEMPERATURE = "temperature"
+    TARGET_TEMP = "targetTemp"
+    TARGET_TEMP_SWITCH = "targetTSwitch"
+    INSIDE_TEMP = "insideTemp"
+    OUTSIDE_TEMP = "outsideTemp"
+    AUTO_TEMP_HIGH_TRIGGER_F = "devHtf"
+    AUTO_TEMP_LOW_TRIGGER_F = "devLtf"
+    TEMPERATURE_F = "temperatureF"
+    TARGET_TEMP_F = "targetTempF"
+    AUTO_HUMIDITY_HIGH_TRIGGER = "devHh"
+    AUTO_HUMIDITY_HIGH_ENABLED = "activeHh"
+    AUTO_HUMIDITY_LOW_TRIGGER = "devLh"
+    AUTO_HUMIDITY_LOW_ENABLED = "activeLh"
+    HUMIDITY = "humidity"
+    TARGET_HUMI = "targetHumi"
+    TARGET_HUMI_SWITCH = "targetHumiSwitch"
+    PHOTOCELL_SWITCH = "photocellSwitch"
+    TREND = "trend"
+    T_TREND = "tTrend"
+    H_TREND = "hTrend"
+    INSIDE_TREND = "insideTrend"
+    OUTSIDE_TREND = "outsideTrend"
+    UNIT = "unit"
+    EC_OR_TDS = "ecOrTds"
+    EC_UNIT = "ecUnit"
+    TDS_UNIT = "tdsUnit"
+    EC_TDS_SETTING_MODE = "ecTdsSettingMode"
+    EC_TDS_ACCURACY = "ecTdsAccuracy"
+    EC_TDS_TARGET_SWITCH = "ecTdsTargetSwitch"
+    EC_TDS_TARGET_VALUE_EC_US = "ecTdsTargetValueEcUs"
+    EC_TDS_TARGET_VALUE_EC_MS = "ecTdsTargetValueEcMs"
+    EC_TDS_TARGET_VALUE_TDS_PPM = "ecTdsTargetValueTdsPpm"
+    EC_TDS_TARGET_VALUE_TDS_PPT = "ecTdsTargetValueTdsPpt"
+    EC_TDS_HIGH_SWITCH = "ecTdsHighSwitch"
+    EC_TDS_HIGH_VALUE_EC_US = "ecTdsHighValueEcUs"
+    EC_TDS_HIGH_VALUE_EC_MS = "ecTdsHighValueEcMs"
+    EC_TDS_HIGH_VALUE_TDS_PPM = "ecTdsHighValueTdsPpm"
+    EC_TDS_HIGH_VALUE_TDS_PPT = "ecTdsHighValueTdsPpt"
+    EC_TDS_LOW_SWITCH_EC = "ecTdsLowSwitchEc"
+    EC_TDS_LOW_SWITCH_TDS = "ecTdsLowSwitchTds"
+    EC_TDS_LOW_VALUE_EC_US = "ecTdsLowValueEcUs"
+    EC_TDS_LOW_VALUE_EC_MS = "ecTdsLowValueEcMs"
+    EC_TDS_LOW_VALUE_TDS_PPM = "ecTdsLowValueTdsPpm"
+    EC_TDS_LOW_VALUE_TDS_PPT = "ecTdsLowValueTdsPpt"
+    PH_SETTING_MODE = "phSettingMode"
+    PH_ACCURACY = "phAccuracy"
+    PH_TARGET_SWITCH = "phTargetSwitch"
+    PH_TARGET_VALUE = "phTargetValue"
+    PH_HIGH_SWITCH = "phHighSwitch"
+    PH_HIGH_VALUE = "phHighValue"
+    PH_LOW_SWITCH = "phLowSwitch"
+    PH_LOW_VALUE = "phLowValue"
+    CO2_SETTING_MODE = "co2SettingMode"
+    CO2_ACCURACY = "co2Accuracy"
+    CO2_TARGET_SWITCH = "co2TargetSwitch"
+    CO2_TARGET_VALUE = "co2TargetValue"
+    CO2_HIGH_SWITCH = "co2HighSwitch"
+    CO2_HIGH_VALUE = "co2HighValue"
+    CO2_LOW_SWITCH = "co2LowSwitch"
+    CO2_LOW_VALUE = "co2LowValue"
+    CO2_FAN_SETTING_MODE = "co2FanSettingMode"
+    CO2_FAN_ACCURACY = "co2FanAccuracy"
+    CO2_FAN_TARGET_SWITCH = "co2FanTargetSwitch"
+    CO2_FAN_TARGET_VALUE = "co2FanTargetValue"
+    CO2_FAN_HIGH_SWITCH = "co2FanHighSwitch"
+    CO2_FAN_HIGH_VALUE = "co2FanHighValue"
+    CO2_FAN_LOW_SWITCH = "co2FanLowSwitch"
+    CO2_FAN_LOW_VALUE = "co2FanLowValue"
+    MOISTURE_SETTING_MODE = "moistureSettingMode"
+    MOISTURE_ACCURACY = "moistureAccuracy"
+    MOISTURE_TARGET_SWITCH = "moistureTargetSwitch"
+    MOISTURE_TARGET_VALUE = "moistureTargetValue"
+    MOISTURE_HIGH_SWITCH = "moistureHighSwitch"
+    MOISTURE_HIGH_VALUE = "moistureHighValue"
+    MOISTURE_LOW_SWITCH = "moistureLowSwitch"
+    MOISTURE_LOW_VALUE = "moistureLowValue"
+    WATER_LEVEL_SETTING_MODE = "waterLevelSettingMode"
+    WATER_LEVEL_ACCURACY = "waterLevelAccuracy"
+    WATER_LEVEL_TARGET_SWITCH = "waterLevelTargetSwitch"
+    WATER_LEVEL_TARGET_VALUE = "waterLevelTargetValue"
+    WATER_LEVEL_HIGH_SWITCH = "waterLevelHighSwitch"
+    WATER_LEVEL_HIGH_VALUE = "waterLevelHighValue"
+    WATER_LEVEL_LOW_SWITCH = "waterLevelLowSwitch"
+    WATER_LEVEL_LOW_VALUE = "waterLevelLowValue"
+    WATER_TEMP_SETTING_MODE = "waterTempSettingMode"
+    WATER_TEMP_ACCURACY = "waterTempAccuracy"
+    WATER_TEMP_TARGET_SWITCH = "waterTempTargetSwitch"
+    WATER_TEMP_TARGET_VALUE = "waterTempTargetValue"
+    WATER_TEMP_HIGH_SWITCH = "waterTempHighSwitch"
+    WATER_TEMP_HIGH_VALUE = "waterTempHighValue"
+    WATER_TEMP_LOW_SWITCH = "waterTempLowSwitch"
+    WATER_TEMP_LOW_VALUE = "waterTempLowValue"
+    WATER_TEMP_TARGET_VALUE_F = "waterTempTargetValueF"
+    WATER_TEMP_HIGH_VALUE_F = "waterTempHighValueF"
+    WATER_TEMP_LOW_VALUE_F = "waterTempLowValueF"
+    IS_OPEN_AUTOMATION = "isOpenAutomation"
+    SETTING_MODE = "settingMode"
+    ONLY_UPDATE_SPEED = "onlyUpdateSpeed"
+    RESTORE = "restore"
+    DEV_SETTING = "devSetting"
+
+
+# noinspection SpellCheckingInspection
+class AdvancedSettingsKey:
+    # /api/dev/getDevSetting
+    # /api/dev/updateAdvSetting
+    DEV_ID = "devId"
+    DEV_NAME = "devName"
+    PORT = "port"
+    SUB_DEVICE_ID = "subDeviceId"
+    SUB_DEVICE_TYPE = "subDeviceType"
+    TEMP_UNIT = "devCompany"
+    CALIBRATE_TEMP = "devCt"
+    CALIBRATE_TEMP_F = "devCth"
+    CALIBRATE_TEMP_F_2 = "devCth2"
+    CALIBRATE_TEMP_2 = "devCt2"
+    CALIBRATE_HUMIDITY = "devCh"
+    VPD_LEAF_TEMP_OFFSET = "vpdCt"
+    VPD_LEAF_TEMP_OFFSET_F = "vpdCth"
+    OUTSIDE_TEMP_COMPARE = "tempCompare"
+    OUTSIDE_HUMIDITY_COMPARE = "humiCompare"
+    DEVICE_LOAD_TYPE = "loadType"
+    DYNAMIC_RESPONSE_TYPE = "isFlag"
+    DYNAMIC_TRANSITION_TEMP = "devTt"
+    DYNAMIC_TRANSITION_TEMP_F = "devTth"
+    DYNAMIC_TRANSITION_HUMIDITY = "devTh"
+    DYNAMIC_TRANSITION_VPD = "vpdTransition"
+    DYNAMIC_BUFFER_TEMP = "devBt"
+    DYNAMIC_BUFFER_TEMP_F = "devBth"
+    DYNAMIC_BUFFER_HUMIDITY = "devBh"
+    DYNAMIC_BUFFER_VPD = "devBvpd"
+    SUNRISE_TIMER_ENABLED = "onTimeSwitch"
+    SUNRISE_TIMER_DURATION = "onTime"
+    ON_MIN_TIME = "onMinTime"
+    ON_MAX_TIME = "onMaxTime"
+    IS_ON_MIN_MAX_TIME = "isOnMinMaxTime"
+    OFF_DOSE_TIME = "offDoseTime"
+    ON_DOSE_TIME = "onDoseTime"
+    IS_OPEN_DOSE_TIME = "isOpenDoseTime"
+    ON_SPEED = "onSpead"
+    OFF_SPEED = "offSpead"
+    ON_SELF_SPEED = "onSelfSpead"
+    AT_TYPE = "atType"
+    SETTING_MODE = "settingMode"
+    VPD_SETTING_MODE = "vpdSettingMode"
+    POWER_STATE = "powerState"
+    SENSOR_ONE_TYPE = "sensorOneType"
+    SENSOR_TWO_TYPE = "sensorTwoType"
+    ZONE_SENSOR_TYPE = "zoneSensorType"
+    INTERCHANGE_SENSOR = "interchangeSensor"
+    PARAM_SENSORS = "paramSensors"
+    SENSOR_SETTING_STR = "sensorSettingStr"
+    SENSOR_TRANS_BUFF_STR = "sensorTransBuffStr"
+    EC_UNIT = "ecUnit"
+    TDS_UNIT = "tdsUnit"
+    EC_OR_TDS = "ecOrTds"
+    PHOTOCELL_SWITCH = "photocellSwitch"
+    KEYTONE_SWITCH = "keytoneSwitch"
+    HAS_KEYTONE_SWITCH = "hasKeytoneSwitch"
+    BACKLIGHT_SWITCH = "backlightSwitch"
+    HAS_BACKLIGHT_SWITCH = "hasBacklightSwitch"
+    TARGET_VPD_SWITCH = "targetVpdSwitch"
+    EXTERNAL_PORT = "externalPort"
+    PORT_PARAM_DATA = "portParamData"
+    SEC_FUC_DEV_TYPE = "secFucDevtype"
+    SEC_FUC_DEV_EFFECT = "secFucDevEffect"
+    SEC_FUC_PARAMS = "secFucParams"
+    SEC_FUC_PARAM_NUMS = "secFucParamNums"
+    SEC_FUC_STATUS = "secFucStatus"
+    DEV_LIGHT = "devLight"
+    OTA_UPDATING = "otaUpdating"
+    SUPPORT_OTA = "supportOta"
+    IS_SHARE = "isShare"
+    TOWARD = "toward"
+
+
+# noinspection SpellCheckingInspection
+class ModeAndSettingKeys:
+    # /api/dev/modeAndSetting
+    DEV_ID = "devId"
+    PORT = "port"
+    EXTERNAL_PORT = "externalPort"
+    MODE_TYPE = "modeType"
+    MASTER_PORT = "masterPort"
+    MODE_AND_SETTING_ID_STR = "modeAndSettingIdStr"
+    SUB_DEVICE_ID = "subDeviceId"
+    SUB_DEVICE_TYPE = "subDeviceType"
+    SUB_DEVICE_VERSION = "subDeviceVersion"
+    TEMP_UNIT = "devCompany"
+    DEVICE_LOAD_TYPE = "loadType"
+    POWER_STATE = "powerState"
+    POWER = "power"
+    LOAD_STATE = "loadState"
+    SPEAK = "speak"
+    ABNORMAL_STATE = "abnormalState"
+    TOWARD = "toward"
+    ON_SPEED = "onSpead"
+    OFF_SPEED = "offSpead"
+    ON_SELF_SPEED = "onSelfSpead"
+    AT_TYPE = "atType"
+    SURPLUS = "surplus"
+    SCHEDULED_START_TIME = "schedStartTime"
+    SCHEDULED_END_TIME = "schedEndtTime"
+    TIMER_DURATION_TO_ON = "acitveTimerOn"
+    TIMER_DURATION_TO_OFF = "acitveTimerOff"
+    CYCLE_DURATION_ON = "activeCycleOn"
+    CYCLE_DURATION_OFF = "activeCycleOff"
+    VPD_HIGH_ENABLED = "activeHtVpd"
+    VPD_HIGH_TRIGGER = "activeHtVpdNums"
+    VPD_LOW_ENABLED = "activeLtVpd"
+    VPD_LOW_TRIGGER = "activeLtVpdNums"
+    VPD_STATUS = "vpdstatus"
+    VPD_NUMS = "vpdnums"
+    VPD_SETTING_MODE = "vpdSettingMode"
+    TARGET_VPD = "targetVpd"
+    TARGET_VPD_SWITCH = "targetVpdSwitch"
+    IS_UPDATE_VPD_NUMS = "isUpdateVpdNums"
+    AUTO_TEMP_HIGH_TRIGGER = "devHt"
+    AUTO_TEMP_HIGH_ENABLED = "activeHt"
+    AUTO_TEMP_LOW_TRIGGER = "devLt"
+    AUTO_TEMP_LOW_ENABLED = "activeLt"
+    TEMPERATURE = "temperature"
+    TARGET_TEMP = "targetTemp"
+    TARGET_TEMP_SWITCH = "targetTSwitch"
+    INSIDE_TEMP = "insideTemp"
+    OUTSIDE_TEMP = "outsideTemp"
+    AUTO_TEMP_HIGH_TRIGGER_F = "devHtf"
+    AUTO_TEMP_LOW_TRIGGER_F = "devLtf"
+    TEMPERATURE_F = "temperatureF"
+    TARGET_TEMP_F = "targetTempF"
+    AUTO_HUMIDITY_HIGH_TRIGGER = "devHh"
+    AUTO_HUMIDITY_HIGH_ENABLED = "activeHh"
+    AUTO_HUMIDITY_LOW_TRIGGER = "devLh"
+    AUTO_HUMIDITY_LOW_ENABLED = "activeLh"
+    HUMIDITY = "humidity"
+    TARGET_HUMI = "targetHumi"
+    TARGET_HUMI_SWITCH = "targetHumiSwitch"
+    TREND = "trend"
+    T_TREND = "tTrend"
+    H_TREND = "hTrend"
+    INSIDE_TREND = "insideTrend"
+    OUTSIDE_TREND = "outsideTrend"
+    UNIT = "unit"
+    EC_OR_TDS = "ecOrTds"
+    EC_UNIT = "ecUnit"
+    TDS_UNIT = "tdsUnit"
+    EC_TDS_SETTING_MODE = "ecTdsSettingMode"
+    EC_TDS_ACCURACY = "ecTdsAccuracy"
+    EC_TDS_TARGET_SWITCH = "ecTdsTargetSwitch"
+    EC_TDS_TARGET_VALUE_EC_US = "ecTdsTargetValueEcUs"
+    EC_TDS_TARGET_VALUE_EC_MS = "ecTdsTargetValueEcMs"
+    EC_TDS_TARGET_VALUE_TDS_PPM = "ecTdsTargetValueTdsPpm"
+    EC_TDS_TARGET_VALUE_TDS_PPT = "ecTdsTargetValueTdsPpt"
+    EC_TDS_HIGH_SWITCH = "ecTdsHighSwitch"
+    EC_TDS_HIGH_VALUE_EC_US = "ecTdsHighValueEcUs"
+    EC_TDS_HIGH_VALUE_EC_MS = "ecTdsHighValueEcMs"
+    EC_TDS_HIGH_VALUE_TDS_PPM = "ecTdsHighValueTdsPpm"
+    EC_TDS_HIGH_VALUE_TDS_PPT = "ecTdsHighValueTdsPpt"
+    EC_TDS_LOW_SWITCH_EC = "ecTdsLowSwitchEc"
+    EC_TDS_LOW_SWITCH_TDS = "ecTdsLowSwitchTds"
+    EC_TDS_LOW_VALUE_EC_US = "ecTdsLowValueEcUs"
+    EC_TDS_LOW_VALUE_EC_MS = "ecTdsLowValueEcMs"
+    EC_TDS_LOW_VALUE_TDS_PPM = "ecTdsLowValueTdsPpm"
+    EC_TDS_LOW_VALUE_TDS_PPT = "ecTdsLowValueTdsPpt"
+    PH_SETTING_MODE = "phSettingMode"
+    PH_ACCURACY = "phAccuracy"
+    PH_TARGET_SWITCH = "phTargetSwitch"
+    PH_TARGET_VALUE = "phTargetValue"
+    PH_HIGH_SWITCH = "phHighSwitch"
+    PH_HIGH_VALUE = "phHighValue"
+    PH_LOW_SWITCH = "phLowSwitch"
+    PH_LOW_VALUE = "phLowValue"
+    CO2_SETTING_MODE = "co2SettingMode"
+    CO2_ACCURACY = "co2Accuracy"
+    CO2_TARGET_SWITCH = "co2TargetSwitch"
+    CO2_TARGET_VALUE = "co2TargetValue"
+    CO2_HIGH_SWITCH = "co2HighSwitch"
+    CO2_HIGH_VALUE = "co2HighValue"
+    CO2_LOW_SWITCH = "co2LowSwitch"
+    CO2_LOW_VALUE = "co2LowValue"
+    CO2_FAN_SETTING_MODE = "co2FanSettingMode"
+    CO2_FAN_ACCURACY = "co2FanAccuracy"
+    CO2_FAN_TARGET_SWITCH = "co2FanTargetSwitch"
+    CO2_FAN_TARGET_VALUE = "co2FanTargetValue"
+    CO2_FAN_HIGH_SWITCH = "co2FanHighSwitch"
+    CO2_FAN_HIGH_VALUE = "co2FanHighValue"
+    CO2_FAN_LOW_SWITCH = "co2FanLowSwitch"
+    CO2_FAN_LOW_VALUE = "co2FanLowValue"
+    MOISTURE_SETTING_MODE = "moistureSettingMode"
+    MOISTURE_ACCURACY = "moistureAccuracy"
+    MOISTURE_TARGET_SWITCH = "moistureTargetSwitch"
+    MOISTURE_TARGET_VALUE = "moistureTargetValue"
+    MOISTURE_HIGH_SWITCH = "moistureHighSwitch"
+    MOISTURE_HIGH_VALUE = "moistureHighValue"
+    MOISTURE_LOW_SWITCH = "moistureLowSwitch"
+    MOISTURE_LOW_VALUE = "moistureLowValue"
+    WATER_LEVEL_SETTING_MODE = "waterLevelSettingMode"
+    WATER_LEVEL_ACCURACY = "waterLevelAccuracy"
+    WATER_LEVEL_TARGET_SWITCH = "waterLevelTargetSwitch"
+    WATER_LEVEL_TARGET_VALUE = "waterLevelTargetValue"
+    WATER_LEVEL_HIGH_SWITCH = "waterLevelHighSwitch"
+    WATER_LEVEL_HIGH_VALUE = "waterLevelHighValue"
+    WATER_LEVEL_LOW_SWITCH = "waterLevelLowSwitch"
+    WATER_LEVEL_LOW_VALUE = "waterLevelLowValue"
+    WATER_TEMP_SETTING_MODE = "waterTempSettingMode"
+    WATER_TEMP_ACCURACY = "waterTempAccuracy"
+    WATER_TEMP_TARGET_SWITCH = "waterTempTargetSwitch"
+    WATER_TEMP_TARGET_VALUE = "waterTempTargetValue"
+    WATER_TEMP_HIGH_SWITCH = "waterTempHighSwitch"
+    WATER_TEMP_HIGH_VALUE = "waterTempHighValue"
+    WATER_TEMP_LOW_SWITCH = "waterTempLowSwitch"
+    WATER_TEMP_LOW_VALUE = "waterTempLowValue"
+    WATER_TEMP_TARGET_VALUE_F = "waterTempTargetValueF"
+    WATER_TEMP_HIGH_VALUE_F = "waterTempHighValueF"
+    WATER_TEMP_LOW_VALUE_F = "waterTempLowValueF"
+    IS_OPEN_AUTOMATION = "isOpenAutomation"
+    SETTING_MODE = "settingMode"
+    ONLY_UPDATE_SPEED = "onlyUpdateSpeed"
+    RESTORE = "restore"
+    SUNRISE_TIMER_ENABLED = "onTimeSwitch"
+    SUNRISE_TIMER_DURATION = "onTime"
+    ON_MIN_TIME = "onMinTime"
+    ON_MAX_TIME = "onMaxTime"
+    IS_ON_MIN_MAX_TIME = "isOnMinMaxTime"
+    OFF_DOSE_TIME = "offDoseTime"
+    ON_DOSE_TIME = "onDoseTime"
+    IS_OPEN_DOSE_TIME = "isOpenDoseTime"
+    PHOTOCELL_SWITCH = "photocellSwitch"
+    KEYTONE_SWITCH = "keytoneSwitch"
+    HAS_KEYTONE_SWITCH = "hasKeytoneSwitch"
+    BACKLIGHT_SWITCH = "backlightSwitch"
+    HAS_BACKLIGHT_SWITCH = "hasBacklightSwitch"
+    DEV_LIGHT = "devLight"
+    SENSOR_ONE_TYPE = "sensorOneType"
+    SENSOR_TWO_TYPE = "sensorTwoType"
+    ZONE_SENSOR_TYPE = "zoneSensorType"
+    SENSOR_SETTING_STR = "sensorSettingStr"
+    SENSOR_TRANS_BUFF_STR = "sensorTransBuffStr"
+    PORT_PARAM_DATA = "portParamData"
+    OTA_UPDATING = "otaUpdating"
+    SUPPORT_OTA = "supportOta"
+    SEC_FUC_STATUS = "secFucStatus"
+    SEC_FUC_DEV_TYPE = "secFucDevtype"
+    SEC_FUC_DEV_EFFECT = "secFucDevEffect"
+    SEC_FUC_PARAM_NUMS = "secFucParamNums"
+    SEC_FUC_PARAMS = "secFucParams"
+
+
+# Schedules are not enabled or disabled by Booleans,
+# but rather disabled when schedule time is set to 65535
+SCHEDULE_DISABLED_VALUE = 65535  # Disabled
+SCHEDULE_MIDNIGHT_VALUE = 0  # 12:00am, default for start time
+SCHEDULE_EOD_VALUE = 1439  # 11:59pm, default for end time
