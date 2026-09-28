@@ -2,8 +2,8 @@
 
 **One self-hosted dashboard for your grow tents – Spider Farmer, Vivosun and AC Infinity together.**
 
-[![Live demo](https://img.shields.io/badge/live%20demo-open-2e7d4f)](https://YOUR-GITHUB-USER.github.io/growdeck/)
-[![CI](https://github.com/YOUR-GITHUB-USER/growdeck/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-GITHUB-USER/growdeck/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/live%20demo-open-2e7d4f)](https://flippowitch.github.io/GrowDeck/)
+[![CI](https://github.com/YOUR-GITHUB-USER/growdeck/actions/workflows/ci.yml/badge.svg)](https://github.com/flippowitch/GrowDeck/actions/workflows/ci.yml)
 ![Docker](https://img.shields.io/badge/runs%20on-Docker-2496ed)
 ![Languages](https://img.shields.io/badge/UI-English%20%7C%20Deutsch-555)
 
