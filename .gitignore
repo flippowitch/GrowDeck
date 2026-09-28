@@ -1,0 +1,21 @@
+# Secrets and data of your own installation – never commit these
+.env
+data/
+backend/data/
+*.sqlite3
+*.sqlite3-*
+generated-password.txt
+
+# Build output and dependencies
+node_modules/
+frontend/dist/
+frontend/dist-demo/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+
+# Misc
+*.zip
+.DS_Store
+Thumbs.db
