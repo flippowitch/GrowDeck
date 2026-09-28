@@ -13,7 +13,7 @@ Zeitraffer, ein Archiv abgeschlossener Grows und eine nächtliche Datensicherung
 GrowDeck läuft als Docker-Projekt, zum Beispiel auf einer UGREEN-NAS mit UGOS Pro. Die
 Oberfläche gibt es auf Deutsch und Englisch.
 
-> 🇬🇧 English: [README.md](README.md) · **[▶ Live-Demo](https://YOUR-GITHUB-USER.github.io/growdeck/)**
+> 🇬🇧 English: [README.md](README.md) · **[▶ Live-Demo](https://flippowitch.github.io/growdeck/)**
 > (läuft komplett im Browser mit simulierten Geräten)
 
 ## Was unterstützt wird
