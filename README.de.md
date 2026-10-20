@@ -353,7 +353,11 @@ wenigen Sekunden wieder da). Eine heruntergeladene Sicherung lässt sich über
 
 ## Bedienung in Kürze
 
-- **Übersicht:** pro Raum Temperatur, Luftfeuchte, VPD, CO₂ und PPFD, dazu ein
+- **Übersicht:** oben stehen, was gerade Aufmerksamkeit braucht (ausgelöste Alarme,
+  erkannte Gießungen, Geräte ohne Daten, wartende Änderungen) und eine Karte pro Zelt mit
+  Temperatur, Luftfeuchte, VPD und einem Farbpunkt für „Klima passt“; ein Tipp auf die
+  Karte zeigt das Zelt darunter. Klimaverlauf und Geräteliste lassen sich einklappen,
+  GrowDeck merkt sich das. Pro Raum Temperatur, Luftfeuchte, VPD, CO₂ und PPFD, dazu ein
   VPD-Diagramm mit Zielbereich für die Phase (Setzlinge, Wachstum, Blüte, späte
   Blüte, Trocknung). Darunter der Verlauf von Temperatur, Luftfeuchte und VPD für
   6 Stunden, 24 Stunden oder 7 Tage (Auswahl oben rechts): drei Grafiken mit

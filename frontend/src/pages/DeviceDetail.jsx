@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api, toast, useStore } from '../store.js'
 import { go, href } from '../router.js'
-import { dateTime, DIGITS, duration, sensorText, timeAgo, VENDORS } from '../format.js'
+import { dateTime, DIGITS, duration, fmt, sensorText, timeAgo, VENDORS } from '../format.js'
 import { Readout } from '../components/Climate.jsx'
 import ControlRow, { levelText } from '../components/ControlRow.jsx'
 import Icon from '../components/Icon.jsx'
-import { Empty, Field, Modal } from '../components/ui.jsx'
+import { Empty, Field, Fold, Modal } from '../components/ui.jsx'
 import { AciPortEditor, SfChannelEditor, SfOutletEditor, SfTargetsEditor, VsFanAutoEditor } from '../editors/Editors.jsx'
 import { useNow } from './Overview.jsx'
 import { t } from '../i18n.js'
@@ -18,6 +18,15 @@ function sourceLabel(source) {
   if (source.startsWith('automation:')) return t('Regel')
   if (source.startsWith('room:')) return t('Zeltsteuerung')
   return source
+}
+
+// The main readings of a device in one line, for the closed list of readings.
+function sensorSummary(device) {
+  return device.sensors
+    .filter((s) => ['temp', 'humi', 'vpd', 'co2', 'ppfd', 'soil_moisture', 'water'].includes(s.kind) && s.value != null && !s.key.includes('.'))
+    .slice(0, 4)
+    .map((s) => sensorText(s) ?? `${fmt(s.value, DIGITS[s.kind] ?? 1)} ${s.unit}`.trim())
+    .join(' · ')
 }
 
 function DeviceSettings({ device, rooms, onClose }) {
@@ -232,9 +241,22 @@ export default function DeviceDetail({ id }) {
 
       {device.info?.notice ? <div className="notice" style={{ marginBottom: 16 }}>{t(device.info.notice)}</div> : null}
 
-      {Object.keys(groups).length ? (
+      {device.controls.length ? (
         <>
-          <h2 className="section">{t('Messwerte')}</h2>
+          <h2 className="section">{t('Ausgänge')}</h2>
+          <div className="panel">
+            <div className="controls" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
+              {device.controls.map((c) => (
+                <ControlRow key={c.id} device={device} control={c} detail onEdit={editButtons} onRename={setRenaming} />
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {Object.keys(groups).length ? (
+        <Fold id="device-sensors" className="page-fold" title={t('Messwerte')} defaultOpen
+          summary={sensorSummary(device)}>
           <div className="panel panel-pad stack">
             {Object.entries(groups).map(([group, sensors]) => (
               <div key={group}>
@@ -249,20 +271,7 @@ export default function DeviceDetail({ id }) {
               </div>
             ))}
           </div>
-        </>
-      ) : null}
-
-      {device.controls.length ? (
-        <>
-          <h2 className="section">{t('Ausgänge')}</h2>
-          <div className="panel">
-            <div className="controls" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))' }}>
-              {device.controls.map((c) => (
-                <ControlRow key={c.id} device={device} control={c} detail onEdit={editButtons} onRename={setRenaming} />
-              ))}
-            </div>
-          </div>
-        </>
+        </Fold>
       ) : null}
 
       {device.info?.camera ? (
@@ -285,54 +294,59 @@ export default function DeviceDetail({ id }) {
         </>
       ) : null}
 
-      <h2 className="section">{t('Geräteinformationen')}</h2>
-      <div className="panel table-wrap">
-        <table className="data">
-          <tbody>
-            {info.map(([k, v]) => (
-              <tr key={k}><th scope="row" style={{ width: 180 }}>{k}</th><td>{v}</td></tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <h2 className="section">{t('Schaltprotokoll der letzten 48 Stunden')}</h2>
-      <div className="panel table-wrap">
-        {log.length ? (
+      <Fold id="device-info" className="page-fold" title={t('Geräteinformationen')}
+        summary={[t(device.model), device.info?.firmware ? t('Firmware {version}', { version: device.info.firmware }) : null].filter(Boolean).join(' · ')}>
+        <div className="panel table-wrap">
           <table className="data">
-            <thead><tr><th>{t('Zeit')}</th><th>{t('Ausgang')}</th><th>{t('Zustand')}</th><th>{t('Ausgelöst von')}</th></tr></thead>
             <tbody>
-              {log.slice(0, 80).map((row, i) => {
-                const control = device.controls.find((c) => c.id === row.control_id)
-                const state = [row.on_state == null ? null : row.on_state ? t('Ein') : t('Aus'),
-                  row.level != null && control?.features.includes('level') && row.on_state ? levelText(control, row.level) : null]
-                  .filter(Boolean).join(', ')
-                return (
-                  <tr key={`${row.ts}-${i}`}>
-                    <td className="num">{dateTime(row.ts)}</td>
-                    <td>{controlLabel(row.control_id)}</td>
-                    <td>{state || '–'}</td>
-                    <td>{sourceLabel(row.source)}</td>
-                  </tr>
-                )
-              })}
+              {info.map(([k, v]) => (
+                <tr key={k}><th scope="row" style={{ width: 180 }}>{k}</th><td>{v}</td></tr>
+              ))}
             </tbody>
           </table>
-        ) : (
-          <p className="muted" style={{ padding: '14px 18px', margin: 0 }}>{t('In den letzten 48 Stunden wurde nichts geschaltet.')}</p>
-        )}
-      </div>
-
-      <h2 className="section">{t('Fehlersuche')}</h2>
-      <details className="raw panel" onToggle={(e) => e.currentTarget.open && loadRaw()}>
-        <summary>{t('Rohdaten des Geräts anzeigen')}</summary>
-        <pre>{raw ? JSON.stringify({ raw: raw.raw, config: raw.config, info: raw.info }, null, 2) : t('Lade …')}</pre>
-      </details>
-      {!device.online ? (
-        <div style={{ marginTop: 16 }}>
-          <button className="btn danger" onClick={forget}><Icon name="trash" size={18} /> {t('Gerät entfernen')}</button>
         </div>
-      ) : null}
+      </Fold>
+
+      <Fold id="device-log" className="page-fold" title={t('Schaltprotokoll der letzten 48 Stunden')}
+        summary={log.length === 1 ? t('1 Schaltvorgang') : t('{n} Schaltvorgänge', { n: log.length })}>
+        <div className="panel table-wrap">
+          {log.length ? (
+            <table className="data">
+              <thead><tr><th>{t('Zeit')}</th><th>{t('Ausgang')}</th><th>{t('Zustand')}</th><th>{t('Ausgelöst von')}</th></tr></thead>
+              <tbody>
+                {log.slice(0, 80).map((row, i) => {
+                  const control = device.controls.find((c) => c.id === row.control_id)
+                  const state = [row.on_state == null ? null : row.on_state ? t('Ein') : t('Aus'),
+                    row.level != null && control?.features.includes('level') && row.on_state ? levelText(control, row.level) : null]
+                    .filter(Boolean).join(', ')
+                  return (
+                    <tr key={`${row.ts}-${i}`}>
+                      <td className="num">{dateTime(row.ts)}</td>
+                      <td>{controlLabel(row.control_id)}</td>
+                      <td>{state || '–'}</td>
+                      <td>{sourceLabel(row.source)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted" style={{ padding: '14px 18px', margin: 0 }}>{t('In den letzten 48 Stunden wurde nichts geschaltet.')}</p>
+          )}
+        </div>
+      </Fold>
+
+      <Fold id="device-debug" className="page-fold" title={t('Fehlersuche')} summary={t('Rohdaten des Geräts')}>
+        <details className="raw panel" onToggle={(e) => e.currentTarget.open && loadRaw()}>
+          <summary>{t('Rohdaten des Geräts anzeigen')}</summary>
+          <pre>{raw ? JSON.stringify({ raw: raw.raw, config: raw.config, info: raw.info }, null, 2) : t('Lade …')}</pre>
+        </details>
+        {!device.online ? (
+          <div style={{ marginTop: 16 }}>
+            <button className="btn danger" onClick={forget}><Icon name="trash" size={18} /> {t('Gerät entfernen')}</button>
+          </div>
+        ) : null}
+      </Fold>
 
       {settingsOpen ? <DeviceSettings device={device} rooms={rooms} onClose={() => setSettingsOpen(false)} /> : null}
       {renaming ? <RenameControl device={device} control={renaming} onClose={() => setRenaming(null)} /> : null}

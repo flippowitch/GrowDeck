@@ -196,7 +196,7 @@ function PlanAdmin({ g }) {
     }
   }
   return (
-    <Block title={t('Plan & Zelt')}>
+    <Block fold="plan" defaultOpen={false} title={t('Plan & Zelt')} hint={tent?.room?.name || t('ohne Zelt')}>
       <div className="panel gp-pad stack">
         {tent.room ? (
           <>

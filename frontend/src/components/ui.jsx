@@ -173,6 +173,47 @@ export function Field({ label, hint, children }) {
   )
 }
 
+// A value of the page remembered in this browser (open sections, chosen tent …).
+export function useRemembered(key, initial) {
+  const storageKey = `gd-ui:${key}`
+  const [value, setValue] = useState(() => {
+    try {
+      const stored = localStorage.getItem(storageKey)
+      return stored == null ? initial : JSON.parse(stored)
+    } catch {
+      return initial
+    }
+  })
+  const save = (next) => {
+    setValue(next)
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next))
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  return [value, save]
+}
+
+// Section that opens and closes with its heading. Closed it shows a one-line summary, so the
+// page stays short without hiding what matters. The state is remembered per browser.
+export function Fold({ id, title, summary, defaultOpen = false, actions, children, className = '' }) {
+  const [open, setOpen] = useRemembered(`open:${id}`, defaultOpen)
+  return (
+    <section className={`fold ${open ? 'open' : ''} ${className}`}>
+      <div className="fold-bar">
+        <button type="button" className="fold-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <span className="fold-chev" aria-hidden="true"><Icon name="down" size={18} /></span>
+          <span className="fold-title">{title}</span>
+          {summary ? <span className="fold-sum">{summary}</span> : null}
+        </button>
+        {actions ? <div className="fold-actions">{actions}</div> : null}
+      </div>
+      {open ? <div className="fold-body">{children}</div> : null}
+    </section>
+  )
+}
+
 export function Empty({ title, children, action }) {
   return (
     <div className="empty">

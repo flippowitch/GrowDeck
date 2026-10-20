@@ -433,6 +433,13 @@ function applyTheme(theme) {
   }
 }
 
+// Sections of the page for the jump bar at the top.
+const SECTIONS = [
+  ['verbindungen', t('Verbindungen')], ['raeume', t('Räume')], ['tag-nacht', t('Tag und Nacht')],
+  ['benachrichtigungen', t('Benachrichtigungen')], ['daten', t('Daten')], ['sicherung', t('Datensicherung')],
+  ['kameras', t('Kameras')], ['darstellung', t('Darstellung')], ['system', t('System')],
+]
+
 export default function Options({ query }) {
   const integrations = useStore((s) => s.integrations)
   const rooms = useStore((s) => s.rooms)
@@ -520,7 +527,16 @@ export default function Options({ query }) {
         </div>
       </div>
 
-      <h2 className="section" style={{ marginTop: 0 }}>{t('Verbindungen')}</h2>
+      <nav className="jump-nav" aria-label={t('Bereiche der Optionen')}>
+        {SECTIONS.map(([key, label]) => (
+          <button key={key} type="button" className="chip-btn"
+            onClick={() => document.getElementById(`bereich-${key}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <h2 className="section" id="bereich-verbindungen" style={{ marginTop: 0 }}>{t('Verbindungen')}</h2>
       <div className="grid-2">
         <SpiderFarmerCard status={integrations.spiderfarmer} />
         <CloudCard vendor="vivosun" status={integrations.vivosun} onChanged={refresh} />
@@ -528,7 +544,7 @@ export default function Options({ query }) {
       </div>
 
       <div className="spread">
-        <h2 className="section">{t('Räume')}</h2>
+        <h2 className="section" id="bereich-raeume">{t('Räume')}</h2>
         <button className="btn small" onClick={() => setEditingRoom({ name: '', sort: rooms.length, stage: 'veg', day_start: '06:00', day_end: '00:00', climate_device_id: '', climate_group: '' })}>
           <Icon name="plus" size={17} /> {t('Raum anlegen')}
         </button>
@@ -554,7 +570,7 @@ export default function Options({ query }) {
         ))}
       </div>
 
-      <h2 className="section">{t('Tag und Nacht ohne Raum')}</h2>
+      <h2 className="section" id="bereich-tag-nacht">{t('Tag und Nacht ohne Raum')}</h2>
       <div className="panel panel-pad stack">
         <p className="muted small" style={{ margin: 0 }}>{t('Gilt für Regeln mit Nachtwert, deren Sensor keinem Raum zugeordnet ist.')}</p>
         <div className="form-grid">
@@ -564,7 +580,7 @@ export default function Options({ query }) {
         <div><button className="btn" onClick={() => saveSettings(['day_start', 'day_end'])}>{t('Zeiten speichern')}</button></div>
       </div>
 
-      <h2 className="section">{t('Benachrichtigungen')}</h2>
+      <h2 className="section" id="bereich-benachrichtigungen">{t('Benachrichtigungen')}</h2>
       <NotifyGroups settings={settings} onChanged={applySettings} />
       <div className="grid-2" style={{ marginTop: 14 }}>
       <TelegramCard settings={settings} onChanged={applySettings} />
@@ -589,7 +605,7 @@ export default function Options({ query }) {
       </div>
       </div>
 
-      <h2 className="section">{t('Daten')}</h2>
+      <h2 className="section" id="bereich-daten">{t('Daten')}</h2>
       <div className="panel panel-pad stack">
         <div className="form-grid">
           <Field label={t('Verlauf aufbewahren (Tage)')}>
@@ -612,7 +628,7 @@ export default function Options({ query }) {
       <h2 className="section" id="bereich-kameras">{t('Kameras')}</h2>
       <CameraSettings />
 
-      <h2 className="section">{t('Darstellung')}</h2>
+      <h2 className="section" id="bereich-darstellung">{t('Darstellung')}</h2>
       <div className="panel panel-pad stack">
         <div className="field">
           <span>{t('Farbschema')}</span>
@@ -632,7 +648,7 @@ export default function Options({ query }) {
         </div>
       </div>
 
-      <h2 className="section">{t('System')}</h2>
+      <h2 className="section" id="bereich-system">{t('System')}</h2>
       <div className="panel table-wrap">
         <table className="data">
           <tbody>

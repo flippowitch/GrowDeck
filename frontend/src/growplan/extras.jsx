@@ -147,7 +147,7 @@ export function WateringSettings({ g }) {
     }
   }
   return (
-    <Block title={t('Erinnerungen')} hint={t('im Protokoll und per Telegram')}>
+    <Block fold="reminders" defaultOpen={false} title={t('Erinnerungen')} hint={t('im Protokoll und per Telegram')}>
       <div className="panel gp-pad stack">
         <div className="gp-form2">
           <Field label={t('Erinnern nach Tagen ohne Gießung')}>
@@ -316,7 +316,7 @@ export function ArchiveBlock({ g }) {
     api('/grows', { quiet: true }).then((d) => setCount(d.grows.length)).catch(() => setCount(0))
   }, [tick])
   return (
-    <Block title={t('Ernte & Archiv')}>
+    <Block fold="harvest" defaultOpen={false} title={t('Ernte & Archiv')} hint={count ? t('{n} im Archiv', { n: count }) : ''}>
       <div className="panel gp-pad stack">
         <p className="small" style={{ margin: 0 }}>
           {t('Nach der Ernte schließt du den Grow ab: Ertrag, Klima, Fotos und Gießprotokoll kommen ins Archiv, der Plan startet für den nächsten Durchgang neu.')}

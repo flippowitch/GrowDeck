@@ -172,6 +172,37 @@
   line-height: 1.1;
   margin: 0;
 }
+.gp-foldhead {
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gp-foldhead h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gp-foldhead:hover h2 {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.gp-fold .fold-chev {
+  display: inline-grid;
+  color: var(--muted);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.gp-fold.open .fold-chev {
+  transform: none;
+}
+.gp-fold:not(.open) .gp-blockhead {
+  margin-bottom: 0;
+}
 .gp-pad {
   padding: 14px 16px;
 }

@@ -182,7 +182,15 @@ export default function ControlRow({ device, control: actual, detail = false, re
           <Icon name={ICONS[control.type] || 'switch'} size={19} />
         </span>
         <div style={{ minWidth: 0 }}>
-          <div className="ctl-name" title={t(control.label)}>{t(control.label)}</div>
+          <div className="ctl-name" title={t(control.label)}>
+            {t(control.label)}
+            {detail && onRename ? (
+              <button type="button" className="ctl-rename" onClick={() => onRename(control)}
+                aria-label={t('{name} umbenennen', { name: t(control.label) })} title={t('Umbenennen')}>
+                <Icon name="edit" size={14} />
+              </button>
+            ) : null}
+          </div>
           <div className="ctl-state">{controlSummary(control) || (displayOnly ? t('Nur Anzeige') : '')}</div>
         </div>
         {features.has('on_off') ? (
@@ -335,14 +343,7 @@ export default function ControlRow({ device, control: actual, detail = false, re
 
       {control.note ? <div className="ctl-note">{t(control.note)}</div> : null}
 
-      {detail && (onEdit || onRename) ? (
-        <div className="row">
-          {onEdit ? onEdit(control) : null}
-          {onRename ? (
-            <button type="button" className="btn ghost small" onClick={() => onRename(control)}>{t('Umbenennen')}</button>
-          ) : null}
-        </div>
-      ) : null}
+      {detail && onEdit ? <div className="row ctl-edit">{onEdit(control)}</div> : null}
     </div>
   )
 }

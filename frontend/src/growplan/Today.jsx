@@ -6,9 +6,8 @@ import { t } from '../i18n.js'
 import { Field, Segmented } from '../components/ui.jsx'
 import { CHECK_GROUPS, MEDIUM_LBL, PHASE_LBL, PLANT_TYPES } from './data.js'
 import {
-  activePlants, agoText, checkDone, checkItems, currentSched, daysBetween, dimForPPFD,
-  dli, envAdj, envOf, f1, fmtDate, hasMissing, klxRange, lastWatering, mid, newPlant, num, phTarget, rng, rngV, shortLamp,
-  stageKey, vpdOf,
+  activePlants, agoText, checkDone, checkItems, currentSched, daysBetween, dimForPPFD, dli, envAdj, envOf, f1, fmtDate,
+  harvestISO, hasMissing, isISO, klxRange, lastWatering, mid, newPlant, num, phTarget, rng, rngV, shortLamp, stageKey, vpdOf,
 } from './engine.js'
 import { Block, Cell, DecimalInput, lightHours, liveText, MixRows, percentOfLevel, Rich } from './parts.jsx'
 import { CameraTile, WateringNotices } from './extras.jsx'
@@ -133,7 +132,7 @@ function Checklist({ g }) {
   const doneCount = items.filter((c) => done.includes(c.id)).length
   const toggle = (id) => saveLibrary({ check: { date: today, done: done.includes(id) ? done.filter((x) => x !== id) : [...done, id] } }).catch(() => {})
   return (
-    <Block id="gp-check" title={t('Sicherheits-Checkliste')} hint={items.length ? t('{done} von {total} erledigt', { done: doneCount, total: items.length }) : ''}>
+    <Block fold="check" id="gp-check" title={t('Sicherheits-Checkliste')} hint={items.length ? t('{done} von {total} erledigt', { done: doneCount, total: items.length }) : ''}>
       <div className="panel">
         {CHECK_GROUPS.map(([group, label]) => {
           const its = items.filter((c) => c.g === group)
@@ -176,7 +175,7 @@ function Plants({ g }) {
   const { plan, today } = g
   const ps = activePlants(plan)
   return (
-    <Block title={t('Pflanzen')} hint={ps.length === 1 ? t('{n} Pflanze', { n: ps.length }) : t('{n} Pflanzen', { n: ps.length })}>
+    <Block fold="plants" title={t('Pflanzen')} hint={ps.length === 1 ? t('{n} Pflanze', { n: ps.length }) : t('{n} Pflanzen', { n: ps.length })}>
       {ps.length ? (
         <div className="gp-entries">
           {ps.map((p) => {
@@ -199,9 +198,22 @@ function Plants({ g }) {
   )
 }
 
+// Closed, the schedule says in one line where the grow stands on the calendar.
+function scheduleHint(plan) {
+  const parts = []
+  if (isISO(plan.floStart)) parts.push(t('Blüte ab {date}', { date: fmtDate(plan.floStart) }))
+  else if (isISO(plan.vegStart)) parts.push(t('Wachstum ab {date}', { date: fmtDate(plan.vegStart) }))
+  else if (isISO(plan.seedStart)) parts.push(t('Anzucht ab {date}', { date: fmtDate(plan.seedStart) }))
+  const harvest = harvestISO(plan)
+  if (harvest) parts.push(t('Ernte {date}', { date: fmtDate(harvest) }))
+  return parts.join(' · ') || t('noch keine Daten')
+}
+
 function Schedule({ g }) {
+  const { plan } = g
+  const anyDate = ['seedStart', 'vegStart', 'floStart', 'harvestDate'].some((k) => isISO(plan[k]))
   return (
-    <Block title={t('Zeitplan')} hint={t('Datum je Phase')}>
+    <Block fold="dates" defaultOpen={!anyDate} title={t('Zeitplan')} hint={scheduleHint(plan)}>
       <div className="panel gp-pad">
         <PhaseDates g={g} />
       </div>
@@ -211,8 +223,9 @@ function Schedule({ g }) {
 
 function Setup({ g }) {
   const { plan, pos, update } = g
+  const area = tentOptions(plan.tent).find(([v]) => v === Number(plan.tent).toFixed(2))?.[1]
   return (
-    <Block title={t('Setup')}>
+    <Block fold="setup" defaultOpen={false} title={t('Setup')} hint={[area, MEDIUM_LBL[plan.medium]].filter(Boolean).join(' · ')}>
       <div className="panel gp-pad stack">
         <div className="gp-form2">
           <Field label={t('Fläche')}>

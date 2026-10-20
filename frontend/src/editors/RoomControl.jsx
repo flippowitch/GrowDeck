@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, toast, useStore } from '../store.js'
 import { fmt, VENDORS } from '../format.js'
 import Icon from '../components/Icon.jsx'
-import { Field, Modal, NumberInput, Segmented } from '../components/ui.jsx'
+import { Field, Modal, NumberInput, Segmented, useRemembered } from '../components/ui.jsx'
 import { LOCALE, t } from '../i18n.js'
 
 export const ROLE_LABELS = {
@@ -40,6 +40,8 @@ export function managedOutputs(roomControl, rooms) {
 }
 
 export function RoomControlPanel({ room, status, devices, onEdit }) {
+  // the outputs are a compact row of states; the reasons per output open on request
+  const [details, setDetails] = useRemembered('open:rc-details', false)
   if (!status) return null
   const tg = status.targets || {}
   const r = status.readings || {}
@@ -75,7 +77,23 @@ export function RoomControlPanel({ room, status, devices, onEdit }) {
       </p>
       {status.paused ? <div className="notice" style={{ margin: '0 18px 14px' }}>{t('Handbetrieb aktiv: Die Zeltsteuerung schaltet gerade nichts.')}</div> : null}
       {status.message ? <div className="notice" style={{ margin: '0 18px 14px' }}>{t(status.message)}</div> : null}
-      {outputs.length ? (
+      {outputs.length && !details ? (
+        <div className="rc-chips">
+          {outputs.map((out) => {
+            const control = devices[out.device_id]?.controls.find((c) => c.id === out.control_id)
+            const on = out.role === 'light' ? control?.on : (out.want?.on ?? out.on)
+            return (
+              <span key={`${out.device_id}|${out.control_id}`} className={`rc-chip ${on ? 'on' : ''} ${out.error ? 'warn' : ''}`}
+                title={`${t(out.label)}, ${out.vendor ? out.device_name : t(out.device_name)}: ${t(out.error || out.reason)}`}>
+                <Icon name={ROLE_ICONS[out.role]} size={15} />
+                {ROLE_LABELS[out.role]} <b>{out.error ? t('Fehler') : stateText(out, control)}</b>
+              </span>
+            )
+          })}
+          <button type="button" className="link-btn" onClick={() => setDetails(true)}>{t('Warum?')}</button>
+        </div>
+      ) : outputs.length ? (
+        <>
         <div className="rc-outputs">
           {outputs.map((out) => {
             const control = devices[out.device_id]?.controls.find((c) => c.id === out.control_id)
@@ -97,6 +115,8 @@ export function RoomControlPanel({ room, status, devices, onEdit }) {
             )
           })}
         </div>
+          <button type="button" className="link-btn rc-less" onClick={() => setDetails(false)}>{t('Weniger anzeigen')}</button>
+        </>
       ) : (
         <p className="muted small" style={{ margin: '0 18px 16px' }}>{t('Noch keine Ausgänge zugeordnet.')}</p>
       )}

@@ -5,7 +5,8 @@ import { useStore } from '../store.js'
 import { fmt, hhmmToMinutes, vpd } from '../format.js'
 import { t } from '../i18n.js'
 import { climateSource } from '../pages/Overview.jsx'
-import { Modal } from '../components/ui.jsx'
+import { Modal, useRemembered } from '../components/ui.jsx'
+import Icon from '../components/Icon.jsx'
 import {
   colFor, f1, f2, mixFor, num, numIn, parseNum, prodColor, rowAt, unitOf,
 } from './engine.js'
@@ -20,7 +21,10 @@ export function Rich({ text }) {
 
 export const Dot = ({ color }) => <span className="gp-dot" style={{ background: color }} aria-hidden="true" />
 
-export function Block({ title, hint, children, id, className = '' }) {
+// A titled block of the Growplan. With `fold` (a key) it opens and closes with its title and
+// remembers that per browser; closed, `hint` tells what is inside.
+export function Block({ title, hint, children, id, className = '', fold, defaultOpen = true }) {
+  if (fold) return <FoldBlock {...{ title, hint, id, className, fold, defaultOpen }}>{children}</FoldBlock>
   return (
     <section className={`gp-block ${className}`} id={id}>
       <div className="gp-blockhead">
@@ -28,6 +32,19 @@ export function Block({ title, hint, children, id, className = '' }) {
         {hint ? <span className="small muted">{hint}</span> : null}
       </div>
       {children}
+    </section>
+  )
+}
+
+function FoldBlock({ title, hint, children, id, className, fold, defaultOpen }) {
+  const [open, setOpen] = useRemembered(`open:gp-${fold}`, defaultOpen)
+  return (
+    <section className={`gp-block gp-fold ${open ? 'open' : ''} ${className}`} id={id}>
+      <button type="button" className="gp-blockhead gp-foldhead" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <h2><span className="fold-chev" aria-hidden="true"><Icon name="down" size={18} /></span>{title}</h2>
+        {hint ? <span className="small muted">{hint}</span> : null}
+      </button>
+      {open ? children : null}
     </section>
   )
 }

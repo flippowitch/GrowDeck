@@ -37,6 +37,7 @@ function Restarting() {
 export default function BackupPanel() {
   const running = useStore((s) => s.backupRunning)
   const [data, setData] = useState(null)
+  const [showAll, setShowAll] = useState(false)
   const [draft, setDraft] = useState(null)
   const [busy, setBusy] = useState('')
   const [restore, setRestore] = useState(null)
@@ -145,7 +146,7 @@ export default function BackupPanel() {
       </div>
       {data.items.length ? (
         <div className="backup-list">
-          {data.items.map((item) => (
+          {(showAll ? data.items : data.items.slice(0, 3)).map((item) => (
             <div className="list-row" key={item.name}>
               <div style={{ minWidth: 0 }}>
                 <div className="title">{dateTime(item.created)}</div>
@@ -160,6 +161,11 @@ export default function BackupPanel() {
               </div>
             </div>
           ))}
+          {data.items.length > 3 ? (
+            <button type="button" className="list-row list-more" onClick={() => setShowAll(!showAll)}>
+              {showAll ? t('Weniger anzeigen') : t('Alle {n} Sicherungen anzeigen', { n: data.items.length })}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {restore ? (

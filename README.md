@@ -51,7 +51,8 @@ your browser with simulated devices; nothing is sent anywhere, and a reload rese
 
 ## Features
 
-- **Overview per tent** – temperature, humidity, VPD, CO₂ and PPFD with the targets of the
+- **Overview per tent** – what needs a look right now at the top, one card per tent with
+  its climate at a glance (tap to show it), collapsible history and device list; temperature, humidity, VPD, CO₂ and PPFD with the targets of the
   current stage, a VPD chart, 6 h / 24 h / 7 day trends with day/night shading and time in
   range, and every device of the tent with its outputs.
 - **All outputs, all modes** – switch, dim and configure Spider Farmer outlets and lights,

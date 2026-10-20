@@ -5,7 +5,7 @@ import { href } from '../router.js'
 import { DIGITS, fmt, sensorText, STAGES, VENDORS, vpd } from '../format.js'
 import { Photoperiod, Readout, VpdChart } from '../components/Climate.jsx'
 import ControlRow from '../components/ControlRow.jsx'
-import { Empty, Modal, Segmented } from '../components/ui.jsx'
+import { Empty, Fold, Modal, Segmented, useRemembered } from '../components/ui.jsx'
 import ClimateTrend, {
   loadTrendRange, saveTrendRange, trailFrom, TREND_RANGES, trendQuery, trendSources, useClimateHistory,
 } from '../components/ClimateTrend.jsx'
@@ -214,25 +214,138 @@ function AdoptTargetsDialog({ room, gp, today, byVpd, onClose }) {
   )
 }
 
-function RoomSection({ room, devices, allDevices, now, control, trendRange, gp, implicit = false }) {
-  const [editing, setEditing] = useState(false)
-  const [adopting, setAdopting] = useState(false)
+// Climate of a tent right now: where the values come from, the values and the targets.
+function tentClimate({ room, devices, allDevices, control, gp, now }) {
   const source = climateSource(room, allDevices, devices)
   const averaged = control?.readings?.sources?.length > 1 ? control.readings : null
   const stage = STAGES[room.stage] || STAGES.veg
   const today = todayISO(new Date(now))
-  // one set of targets for readouts, charts and the VPD diagram: Growplan, room control or phase
-  const targets = useMemo(() => tentTargets({ gp, control, stage, today }), [gp, control, stage, today])
+  const targets = tentTargets({ gp, control, stage, today })
   const day = isDayNow(room, control, now)
-  const band = targets.vpd ? targets.vpd[day ? 'day' : 'night'] : null
   const temp = averaged?.temp ?? source.temp?.value ?? null
   const humi = averaged?.humi ?? source.humi?.value ?? null
+  const vpdValue = averaged ? vpd(temp, humi) : source.vpd?.value ?? vpd(temp, humi)
+  return { source, averaged, stage, today, targets, day, temp, humi, vpdValue }
+}
+
+const TONE_RANK = { good: 0, warn: 1, bad: 2 }
+
+// Worst state of temperature, humidity and VPD against the targets of now.
+function climateTone(c) {
+  let worst = null
+  for (const [key, value] of [['temp', c.temp], ['humi', c.humi], ['vpd', c.vpdValue]]) {
+    const band = c.targets?.[key]?.[c.day ? 'day' : 'night']
+    const j = judge(key, value, band)
+    if (j && (worst == null || TONE_RANK[j.tone] > TONE_RANK[worst])) worst = j.tone
+  }
+  return worst
+}
+
+const TONE_TEXT = { good: t('Klima passt'), warn: t('Klima knapp daneben'), bad: t('Klima deutlich daneben') }
+
+// One card per tent at the top of the overview: the most important numbers at a glance, and
+// a tap shows that tent below.
+function TentCards({ sections, selected, onSelect }) {
+  return (
+    <div className="tent-cards" role="tablist" aria-label={t('Zelte')}>
+      {sections.map((sec) => {
+        const c = sec.climate
+        const tone = c ? climateTone(c) : null
+        const offline = sec.devices.filter((d) => !d.online).length
+        const phase = sec.gp ? (sec.gp.status.phase === 'seed' ? t(phaseLabel(sec.gp.status.phase, sec.gp.status.week))
+          : `${PHASE_LBL[sec.gp.status.phase]} · ${t('Woche {week}', { week: sec.gp.status.week })}`) : null
+        return (
+          <button key={sec.id} type="button" role="tab" aria-selected={selected === sec.id}
+            className={`tent-card ${selected === sec.id ? 'active' : ''}`} onClick={() => onSelect(sec.id)}>
+            <span className="tent-card-head">
+              <b>{sec.name}</b>
+              {tone ? <span className={`tone-dot ${tone}`} title={TONE_TEXT[tone]} aria-label={TONE_TEXT[tone]} /> : null}
+            </span>
+            {c && c.temp != null ? (
+              <span className="tent-card-values num">
+                {fmt(c.temp, 1)} °C · {fmt(c.humi, 0)} % · {fmt(c.vpdValue, 2)} kPa
+              </span>
+            ) : (
+              <span className="tent-card-values muted">{sec.devices.length === 1 ? t('1 Gerät') : t('{n} Geräte', { n: sec.devices.length })}</span>
+            )}
+            <span className="tent-card-foot">
+              {phase ? <span>{phase}</span> : null}
+              {offline ? <span className="tent-card-warn">{t('{n} offline', { n: offline })}</span> : null}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// What needs a look right now, gathered from all pages: triggered alarms, recognised
+// waterings, devices without data and changes still waiting for a device.
+function Attention({ devices, rooms, growplans }) {
+  const alarmStatus = useStore((s) => s.alarmStatus)
+  const watering = useStore((s) => s.watering)
+  const items = []
+  const firing = Object.values(alarmStatus || {}).filter((a) => a?.firing).length
+  if (firing) {
+    items.push({ key: 'alarms', tone: 'alert', text: firing === 1 ? t('1 Alarm ist ausgelöst.') : t('{n} Alarme sind ausgelöst.', { n: firing }),
+      href: href('alarms'), action: t('Ansehen') })
+  }
+  for (const plan of growplans) {
+    const found = watering?.suggestions?.[plan.id] || []
+    if (!found.length) continue
+    const room = rooms.find((r) => r.id === plan.room_id)
+    items.push({ key: `water-${plan.id}`, tone: 'frost',
+      text: t('{tent}: Gießung erkannt – ins Protokoll eintragen?', { tent: room?.name || plan.name || 'Growplan' }),
+      href: href(`growplan/${plan.room_id ? plan.room_id : plan.id}`), action: t('Zum Growplan') })
+  }
+  const offline = devices.filter((d) => !d.online)
+  if (offline.length) {
+    items.push({ key: 'offline', tone: 'warn',
+      text: offline.length === 1 ? t('{name} sendet keine Daten.', { name: offline[0].name }) : t('{n} Geräte senden keine Daten.', { n: offline.length }),
+      href: href(offline.length === 1 ? `devices/${offline[0].id}` : 'devices'), action: t('Prüfen') })
+  }
+  const waiting = devices.filter((d) => Object.keys(d.pending || {}).length)
+  if (waiting.length) {
+    items.push({ key: 'pending', tone: 'frost',
+      text: t('Änderungen warten auf {names}.', { names: waiting.map((d) => d.name).join(', ') }),
+      href: href(`devices/${waiting[0].id}`), action: t('Ansehen') })
+  }
+  if (!items.length) return null
+  return (
+    <section className="attention" aria-label={t('Braucht deine Aufmerksamkeit')}>
+      {items.map((item) => (
+        <div className={`attention-item ${item.tone}`} key={item.key}>
+          <span className={`tone-dot ${item.tone === 'alert' ? 'bad' : item.tone === 'warn' ? 'warn' : 'info'}`} aria-hidden="true" />
+          <span className="attention-text">{item.text}</span>
+          <a className="btn small" href={item.href}>{item.action}</a>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+// One line about the devices of a tent for the closed device list.
+function devicesSummary(devices) {
+  const outputs = devices.flatMap((d) => d.controls.filter((c) => !c.extra?.empty && c.on != null))
+  const on = outputs.filter((c) => c.on).length
+  const offline = devices.filter((d) => !d.online).length
+  const parts = [devices.length === 1 ? t('1 Gerät') : t('{n} Geräte', { n: devices.length })]
+  if (outputs.length) parts.push(t('{on} von {total} Ausgängen an', { on, total: outputs.length }))
+  if (offline) parts.push(t('{n} offline', { n: offline }))
+  return parts.join(' · ')
+}
+
+function RoomSection({ room, devices, allDevices, now, control, trendRange, onTrendRange, gp, implicit = false }) {
+  const [editing, setEditing] = useState(false)
+  const [adopting, setAdopting] = useState(false)
+  // one set of targets for readouts, charts and the VPD diagram: Growplan, room control or phase
+  const { source, averaged, stage, today, targets, day, temp, humi, vpdValue } = tentClimate({ room, devices, allDevices, control, gp, now })
+  const band = targets.vpd ? targets.vpd[day ? 'day' : 'night'] : null
   const refs = trendSources({ roomDevices: devices, source, averaged, control })
   const history = useClimateHistory(trendQuery(refs, room), trendRange)
   const trail = useMemo(() => trailFrom(history.data), [history.data])
   const gpKey = gp ? (gp.room_id ? room.id : gp.id) : null
   const historySeries = [...refs.temp, ...refs.humi, ...refs.vpd]
-  const vpdValue = averaged ? vpd(temp, humi) : source.vpd?.value ?? vpd(temp, humi)
   const ppfdValue = source.ppfd?.value ?? null
   const skip = new Set(
     ['temp', 'humi', 'vpd', 'co2', 'ppfd'].filter((k) => source[k]).map((k) => `${source.device.id}|${source[k].key}`),
@@ -288,16 +401,20 @@ function RoomSection({ room, devices, allDevices, now, control, trendRange, gp, 
         </div>
       </div>
       {historySeries.length ? (
-        <ClimateTrend
-          data={history.data}
-          loading={history.loading}
-          error={history.error}
-          rangeKey={trendRange}
-          targets={targets}
-          targetNote={targetLegend(targets, stage, implicit)}
-          syncKey={`trend-${room.id}`}
-          historyHref={href(`history?series=${encodeURIComponent(historySeries.join(','))}`)}
-        />
+        <Fold id="overview-trend" title={t('Klimaverlauf')} defaultOpen
+          summary={TREND_RANGES.find((r) => r.key === trendRange)?.label}
+          actions={<Segmented label={t('Zeitraum der Verläufe')} value={trendRange} options={TREND_RANGES} onChange={onTrendRange} />}>
+          <ClimateTrend
+            data={history.data}
+            loading={history.loading}
+            error={history.error}
+            rangeKey={trendRange}
+            targets={targets}
+            targetNote={targetLegend(targets, stage, implicit)}
+            syncKey={`trend-${room.id}`}
+            historyHref={href(`history?series=${encodeURIComponent(historySeries.join(','))}`)}
+          />
+        </Fold>
       ) : null}
       {control ? <RoomControlPanel room={room} status={control} devices={allDevices} onEdit={() => setEditing(true)} /> : null}
       {editing ? <RoomControlEditor room={room} onClose={() => setEditing(false)} /> : null}
@@ -305,7 +422,9 @@ function RoomSection({ room, devices, allDevices, now, control, trendRange, gp, 
         <AdoptTargetsDialog room={room} gp={gp} today={today} byVpd={control?.plan?.humidity_mode === 'vpd'} onClose={() => setAdopting(false)} />
       ) : null}
       {devices.length ? (
-        <DevicePanel devices={devices} skipSensors={skip} />
+        <Fold id="overview-devices" title={t('Geräte im Zelt')} summary={devicesSummary(devices)}>
+          <DevicePanel devices={devices} skipSensors={skip} />
+        </Fold>
       ) : (
         <p className="muted">{t('Diesem Raum ist noch kein Gerät zugeordnet. Das geht in den Gerätedetails.')}</p>
       )}
@@ -342,6 +461,27 @@ export default function Overview() {
   // without rooms the plan without a tent (the latest one) belongs to all devices
   const loosePlan = [...growplans].filter((p) => !p.room_id).sort((a, b) => b.updated - a.updated)[0] || null
 
+  // every tent (and the devices without one) is one section; the overview shows one at a time
+  const sections = rooms.map((room) => {
+    const roomDevices = list.filter((d) => d.info?.room_id === room.id)
+    const gp = growplans.find((p) => p.room_id === room.id) || null
+    const control = roomControl?.[room.id]
+    return {
+      id: room.id, name: room.name, room, devices: roomDevices, gp, control,
+      climate: tentClimate({ room, devices: roomDevices, allDevices: devices, control, gp, now }),
+    }
+  })
+  if (implicitRoom) {
+    sections.push({
+      id: implicitRoom.id, name: implicitRoom.name, room: implicitRoom, devices: unassigned, gp: loosePlan, implicit: true,
+      climate: tentClimate({ room: implicitRoom, devices: unassigned, allDevices: devices, gp: loosePlan, now }),
+    })
+  } else if (unassigned.length) {
+    sections.push({ id: 'ohne-raum', name: rooms.length ? t('Ohne Raum') : t('Alle Geräte'), devices: unassigned, loose: true })
+  }
+  const [chosen, setChosen] = useRemembered('overview-tent', null)
+  const current = sections.find((x) => x.id === chosen) || sections[0] || null
+
   return (
     <>
       <div className="page-head">
@@ -355,12 +495,6 @@ export default function Overview() {
         <div className="row page-tools">
           {settings.demo ? <span className="chip frost">{t('Demo mit simulierten Geräten')}</span> : null}
           {list.length ? <OverrideButton className="btn small" /> : null}
-          {list.length ? (
-            <div className="row trend-range">
-              <span className="small muted">{t('Verläufe')}</span>
-              <Segmented label={t('Zeitraum der Verläufe')} value={trendRange} options={TREND_RANGES} onChange={changeTrendRange} />
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -375,34 +509,36 @@ export default function Overview() {
         </div>
       ) : null}
 
-      {rooms.map((room) => (
+      <Attention devices={list} rooms={rooms} growplans={growplans} />
+
+      {sections.length > 1 ? <TentCards sections={sections} selected={current?.id} onSelect={setChosen} /> : null}
+
+      {current && !current.loose ? (
         <RoomSection
-          key={room.id}
-          room={room}
-          devices={list.filter((d) => d.info?.room_id === room.id)}
+          key={current.id}
+          room={current.room}
+          devices={current.devices}
           allDevices={devices}
           now={now}
-          control={roomControl?.[room.id]}
+          control={current.control}
           trendRange={trendRange}
-          gp={growplans.find((p) => p.room_id === room.id) || null}
+          onTrendRange={changeTrendRange}
+          gp={current.gp}
+          implicit={!!current.implicit}
         />
-      ))}
-
-      {implicitRoom ? (
-        <RoomSection room={implicitRoom} devices={unassigned} allDevices={devices} now={now} trendRange={trendRange} gp={loosePlan} implicit />
       ) : null}
 
-      {unassigned.length && !implicitRoom ? (
+      {current?.loose ? (
         <section className="room">
           <div className="room-head">
-            <h2>{rooms.length ? t('Ohne Raum') : t('Alle Geräte')}</h2>
+            <h2>{current.name}</h2>
             <span className="small muted">
               {rooms.length
                 ? t('Ordne diese Geräte in den Gerätedetails einem Raum zu.')
                 : t('Lege unter Optionen einen Raum an, um Klima und Lichtphase pro Zelt zu sehen.')}
             </span>
           </div>
-          <DevicePanel devices={unassigned} />
+          <DevicePanel devices={current.devices} />
         </section>
       ) : null}
     </>
