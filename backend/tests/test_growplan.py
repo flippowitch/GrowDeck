@@ -134,6 +134,15 @@ def test_phases() -> None:
     status = plan_status(plan, date(2026, 9, 26), {"date": "2026-09-25", "type": "feed", "liters": 4})
     check(status["stage"] == "flo2" and status["max_week"] == 8 and status["harvest"] == "2026-10-31", "status")
     check(status["last_watering"] == {"date": "2026-09-25", "type": "feed", "liters": 4}, "last watering")
+    # dates per phase: seedling start and an own harvest date
+    own = sanitize_plan({**plan, "seedStart": "2026-07-20", "harvestDate": "2026-11-03", "phase": "veg"})
+    check(own["seedStart"] == "2026-07-20" and own["harvestDate"] == "2026-11-03", "phase dates kept")
+    check(auto_position(own, date(2026, 7, 19)) is None, "before the seedling start the manual phase applies")
+    check(auto_position(own, date(2026, 7, 20)) == ("seed", 1) and auto_position(own, date(2026, 7, 30)) == ("seed", 2),
+          "seedling weeks from the seedling start")
+    check(auto_position(own, date(2026, 8, 1)) == ("veg", 1), "veg after the seedlings")
+    check(plan_status(own, date(2026, 9, 26))["harvest"] == "2026-11-03", "own harvest date")
+    check(sanitize_plan({"seedStart": "2026-13-01"})["seedStart"] == "", "invalid seedling date dropped")
 
     targets = control_targets(sanitize_plan({"phase": "veg", "week": 1}), date(2026, 9, 26))
     check(targets["stage"] == "veg1" and targets["light_hours"] == 18, "targets stage")

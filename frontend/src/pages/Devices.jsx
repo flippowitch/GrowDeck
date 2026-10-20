@@ -72,6 +72,9 @@ export default function Devices() {
                 <div className="row">
                   {d.simulated ? <span className="chip">{t('Simuliert')}</span> : null}
                   {d.info?.hidden ? <span className="chip">{t('Ausgeblendet')}</span> : null}
+                  {Object.keys(d.pending || {}).length ? (
+                    <span className="chip frost">{t('{n} Änderung wartet', { n: Object.keys(d.pending).length })}</span>
+                  ) : null}
                   <span className={`chip ${d.online ? 'leaf' : 'alert'}`}>
                     {d.online ? t('Online') : t('Offline, {ago}', { ago: timeAgo(d.last_seen, offset) })}
                   </span>

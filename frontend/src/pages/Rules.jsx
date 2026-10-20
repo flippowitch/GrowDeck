@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, setState, toast, useStore } from '../store.js'
+import { OverrideButton } from '../components/Override.jsx'
 import { fmt } from '../format.js'
 import Icon from '../components/Icon.jsx'
 import { DaysPicker, Empty, Field, Modal, NumberInput, Segmented, Toggle } from '../components/ui.jsx'
@@ -336,6 +337,7 @@ export default function Rules() {
             <Toggle checked={automation.enabled} onChange={setEnabled} label={t('Regeln ausführen')} />
             {automation.enabled ? t('Regeln laufen') : t('Pausiert')}
           </label>
+          <OverrideButton />
           <button className="btn primary" onClick={() => setEditing(NEW_RULE)}><Icon name="plus" size={18} /> {t('Neue Regel')}</button>
         </div>
       </div>

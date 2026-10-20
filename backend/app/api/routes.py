@@ -98,6 +98,7 @@ async def state(ctx: AppContext = Depends(authed)) -> dict[str, Any]:
         "settings": await _settings_payload(ctx),
         "automation": ctx.automation.status(),
         "room_control": ctx.room_control.status_all(),
+        "override": ctx.hub.override_status(),
         "growplans": ctx.growplan.summaries(),
         "watering": ctx.watering.payload(),
         "alarms": ctx.alarms.status(),
@@ -173,10 +174,18 @@ async def command(device_id: str, control_id: str, body: ControlCommand,
     patch = body.model_dump(exclude_none=True)
     control = None
     try:
-        control = await ctx.hub.command(device_id, control_id, patch, source="user")
+        control = await ctx.hub.command(device_id, control_id, patch, source="user", queue=True)
     except CommandError as err:
         raise _bad(err) from err
-    return control.to_dict()
+    pending = (ctx.hub.pending.get(device_id) or {}).get(control_id)
+    return {**control.to_dict(), "pending": pending}
+
+
+@router.delete("/devices/{device_id}/pending")
+async def cancel_pending(device_id: str, control_id: str | None = None,
+                         ctx: AppContext = Depends(authed)) -> dict[str, Any]:
+    await ctx.hub.cancel_pending(device_id, control_id)
+    return {"ok": True, "pending": ctx.hub.pending.get(device_id) or {}}
 
 
 class ControlRename(BaseModel):
@@ -637,6 +646,32 @@ async def automation_enabled(body: EnabledBody, ctx: AppContext = Depends(authed
     await ctx.hub.add_event("info", "automation",
                             "Automationen eingeschaltet." if body.enabled else "Automationen pausiert.")
     return ctx.automation.status()
+
+
+class OverrideBody(BaseModel):
+    active: bool
+    minutes: float | None = Field(default=None, gt=0, le=7 * 24 * 60)
+
+
+@router.get("/override")
+async def get_override(ctx: AppContext = Depends(authed)) -> dict[str, Any]:
+    return ctx.hub.override_status()
+
+
+@router.post("/override")
+async def set_override(body: OverrideBody, ctx: AppContext = Depends(authed)) -> dict[str, Any]:
+    """Manual mode: rules and tent controls pause, every output keeps what is set by hand."""
+    was = ctx.hub.override_active()
+    result = await ctx.hub.set_override(body.active, body.minutes)
+    if body.active and not was:
+        await ctx.hub.add_event("info", "automation",
+                                "Handbetrieb eingeschaltet: Regeln und Zeltsteuerung schalten nichts, "
+                                "bis du ihn beendest." if not body.minutes else
+                                f"Handbetrieb für {body.minutes:g} Minuten eingeschaltet: Regeln und "
+                                "Zeltsteuerung schalten in der Zeit nichts.")
+    elif not body.active and was:
+        await ctx.hub.add_event("info", "automation", "Handbetrieb beendet, die Automatik übernimmt wieder.")
+    return result
 
 
 # --------------------------------------------------------------------- alarms

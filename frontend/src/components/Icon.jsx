@@ -36,6 +36,8 @@ const P = {
   gp_light: <><path d="M4 6h16v5H4z" /><path d="M7 11v3M12 11v5M17 11v3" /><path d="M12 3v3" /></>,
   prev: <><path d="M15 5l-7 7 7 7" /></>,
   next: <><path d="M9 5l7 7-7 7" /></>,
+  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  hand: <><path d="M8 12V6.5a1.5 1.5 0 013 0V11M11 10.5V5a1.5 1.5 0 013 0v5.5M14 10.5V6.5a1.5 1.5 0 013 0V14a6 6 0 01-6 6h-.5a5.5 5.5 0 01-4.6-2.5L4.3 14.6a1.5 1.5 0 012.4-1.8L8 14.5" /></>,
   lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8.5 11V8a3.5 3.5 0 017 0v3" /></>,
   send: <><path d="M4 12l16-8-6 16-3-7z" /><path d="M11 13l9-9" /></>,
 }

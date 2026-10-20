@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { api, toast, useStore } from '../store.js'
+import { OverrideButton } from '../components/Override.jsx'
 import { href } from '../router.js'
 import { DIGITS, fmt, sensorText, STAGES, VENDORS, vpd } from '../format.js'
 import { Photoperiod, Readout, VpdChart } from '../components/Climate.jsx'
@@ -317,6 +318,7 @@ export default function Overview() {
   const rooms = useStore((s) => s.rooms)
   const offset = useStore((s) => s.serverOffset)
   const automation = useStore((s) => s.automation)
+  const override = useStore((s) => s.override)
   const settings = useStore((s) => s.settings)
   const roomControl = useStore((s) => s.roomControl)
   const growplans = useStore((s) => s.growplans)
@@ -347,11 +349,12 @@ export default function Overview() {
           <h1>{t('Übersicht')}</h1>
           <p>
             {list.length === 1 ? t('1 Gerät, davon {online} online.', { online }) : t('{n} Geräte, davon {online} online.', { n: list.length, online })}{' '}
-            {automation.enabled ? t('Regeln sind aktiv.') : t('Regeln sind pausiert.')}
+            {override.active ? t('Handbetrieb: Regeln und Zeltsteuerung pausieren.') : automation.enabled ? t('Regeln sind aktiv.') : t('Regeln sind pausiert.')}
           </p>
         </div>
         <div className="row page-tools">
           {settings.demo ? <span className="chip frost">{t('Demo mit simulierten Geräten')}</span> : null}
+          {list.length ? <OverrideButton className="btn small" /> : null}
           {list.length ? (
             <div className="row trend-range">
               <span className="small muted">{t('Verläufe')}</span>

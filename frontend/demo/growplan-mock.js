@@ -20,8 +20,7 @@ const now = () => Math.floor(Date.now() / 1000)
 // ------------------------------------------------------------ snapshot
 function shiftPlanData(data) {
   const out = clone(data)
-  out.vegStart = shiftISO(out.vegStart)
-  out.floStart = shiftISO(out.floStart)
+  for (const key of ['seedStart', 'vegStart', 'floStart', 'harvestDate']) if (out[key]) out[key] = shiftISO(out[key])
   for (const p of out.plants || []) p.start = shiftISO(p.start)
   return out
 }
@@ -139,7 +138,7 @@ export function roomDeleted(roomId) {
 // ------------------------------------------------------------- plans
 const GERMAN_DEFAULT = () => ({
   phase: 'veg', week: 1, vegWeeks: 4, floWeeks: 8, sched: 'an-sensi-top', strength: 100, liters: 5, tent: 0.81,
-  vegStart: '', floStart: '', dim: 100, tAir: 24, rh: 55, leafOff: 2, medium: 'erde',
+  seedStart: '', vegStart: '', floStart: '', harvestDate: '', dim: 100, tAir: 24, rh: 55, leafOff: 2, medium: 'erde',
   plants: [1, 2, 3].map((i) => ({ id: `p${i}`, name: t('Pflanze {n}', { n: i }), strain: '', type: 'photo', pot: null, start: '', note: '' })),
   hidden: {}, envOv: {}, lamp: { name: 'Spider Farmer G3000', ppf: 852, watt: 300, util: 85, luxF: 65, price: 0.3 }, luxIn: '',
 })
@@ -366,7 +365,7 @@ function archivePlan(id, record, raw) {
   const harvested = isISO(raw.harvested) ? raw.harvested : todayISO()
   const extra = details(raw)
   const room = ctx.rooms?.().find((r) => r.id === record.room_id) || null
-  const candidates = [plan.vegStart, ...(plan.plants || []).map((p) => p.start), ...log.map((e) => e.date)].filter((d) => isISO(d) && d <= harvested)
+  const candidates = [plan.seedStart, plan.vegStart, ...(plan.plants || []).map((p) => p.start), ...log.map((e) => e.date)].filter((d) => isISO(d) && d <= harvested)
   const started = candidates.length ? candidates.sort()[0] : localISO(record.created)
   const active = (plan.plants || []).filter((p) => !p.gone)
   const strains = [...new Set(active.map((p) => p.strain).filter(Boolean))].sort()
@@ -383,7 +382,7 @@ function archivePlan(id, record, raw) {
   grows = [grow, ...grows].sort((a, b) => (b.harvested || '').localeCompare(a.harvested || '') || b.created - a.created)
   if (raw.reset) {
     record.data = merge({
-      ...plan, phase: 'seed', week: 1, vegStart: '', floStart: '', luxIn: '',
+      ...plan, phase: 'seed', week: 1, seedStart: '', vegStart: '', floStart: '', harvestDate: '', luxIn: '',
       plants: active.map((p) => ({ ...p, start: '', note: '' })),
     })
     for (const p of record.data.plants) delete p.gone

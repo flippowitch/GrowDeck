@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Icon from './Icon.jsx'
 import { LevelSlider, NumberInput, Segmented, Toggle } from './ui.jsx'
-import { sendCommand, useStore } from '../store.js'
+import { cancelPending, sendCommand, useStore, withPending } from '../store.js'
 import { fmt } from '../format.js'
 import { sliderLock } from '../controlLock.js'
 import { t } from '../i18n.js'
@@ -99,13 +99,41 @@ function levelShare(control) {
   return Math.max(0, Math.min(1, (Number(value) - lo) / (hi - lo)))
 }
 
+// Changes waiting for a device that is offline, with a way to drop them.
+function PendingNote({ device, control, pending, readOnly }) {
+  const [busy, setBusy] = useState(false)
+  if (!pending) return null
+  const drop = async () => {
+    setBusy(true)
+    try {
+      await cancelPending(device.id, control.id)
+    } catch {
+      /* toast shown */
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="ctl-pending">
+      <Icon name="clock" size={14} />
+      <span>{device.online ? t('Wird übertragen …') : t('Gespeichert, wird übertragen, sobald {name} wieder online ist.', { name: device.name })}</span>
+      {readOnly ? null : (
+        <button type="button" className="link-btn" onClick={drop} disabled={busy}>{t('Verwerfen')}</button>
+      )}
+    </div>
+  )
+}
+
 // One output of a device. `readOnly` shows its state without anything to operate (overview);
-// changes happen in the device details.
-export default function ControlRow({ device, control, detail = false, readOnly = false, onEdit, onRename }) {
+// changes happen in the device details. Outputs of a device that is offline can still be
+// set: the server keeps the change and sends it as soon as the device reports again.
+export default function ControlRow({ device, control: actual, detail = false, readOnly = false, onEdit, onRename }) {
   const [busy, setBusy] = useState(false)
   const roomControl = useStore((s) => s.roomControl)
+  const pending = device.pending?.[actual.id] || null
+  const control = withPending(device, actual)
   const features = new Set(control.features || [])
-  const disabled = !device.online || busy
+  const disabled = busy
   const extra = control.extra || {}
   const lock = readOnly ? null : sliderLock(device, control, roomControl)
 
@@ -140,13 +168,15 @@ export default function ControlRow({ device, control, detail = false, readOnly =
         {share != null ? (
           <div className={`ctl-meter ${sliderTone}`} aria-hidden="true"><span style={{ width: `${share * 100}%` }} /></div>
         ) : null}
+        <PendingNote device={device} control={control} pending={pending} readOnly />
         {control.note ? <div className="ctl-note">{t(control.note)}</div> : null}
       </div>
     )
   }
 
   return (
-    <div className={`ctl ${device.online ? '' : 'offline'}`}>
+    // stays fully usable while the device is offline: changes wait for it
+    <div className="ctl">
       <div className="ctl-top">
         <span className={`ctl-icon ${control.on ? 'on' : ''} ${tone}`}>
           <Icon name={ICONS[control.type] || 'switch'} size={19} />
@@ -198,8 +228,17 @@ export default function ControlRow({ device, control, detail = false, readOnly =
         />
       ) : null}
       {lock && (features.has('level') || (detail && features.has('spectrum'))) ? (
-        <div className="ctl-lock"><Icon name="lock" size={14} /><span>{lock.text}</span></div>
+        <div className="ctl-lock">
+          <Icon name="lock" size={14} />
+          <span>{lock.text}</span>
+          {lock.by === 'mode' && lock.manual != null ? (
+            <button type="button" className="link-btn" disabled={disabled} onClick={() => run({ mode: lock.manual })}>
+              {t('Jetzt umstellen')}
+            </button>
+          ) : null}
+        </div>
       ) : null}
+      <PendingNote device={device} control={control} pending={pending} />
 
       {features.has('option') && control.type !== 'select' ? (
         <label className="row small">

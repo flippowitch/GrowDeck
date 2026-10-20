@@ -438,6 +438,90 @@ async def test_vivosun_plugs() -> None:
         await db.close()
 
 
+# ------------------------------------------- offline devices and manual mode
+async def test_offline_queue_and_override() -> None:
+    from app.adapters.base import Adapter
+    from app.automation import AutomationEngine
+
+    class Recorder(Adapter):
+        vendor = "spiderfarmer"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[tuple[str, dict]] = []
+
+        async def apply(self, device, control_id, patch):
+            self.sent.append((control_id, dict(patch)))
+            control = device.controls[control_id]
+            if "on" in patch:
+                control.on = patch["on"]
+            if "level" in patch:
+                control.level = patch["level"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(Path(tmp) / "o.sqlite3")
+        await db.open()
+        hub = Hub(db, EventBus())
+        adapter = Recorder()
+        hub.register_adapter(adapter)
+        await hub.start()
+        device = Device(id="sf-1", vendor="spiderfarmer", native_id="1", model="GGS", kind="controller",
+                        name="Lüfter", online=False)
+        device.controls["fan"] = Control(id="fan", type="exhaust_fan", label="Abluft", on=False, level=0,
+                                         features=["on_off", "level"])
+        hub.devices[device.id] = device
+        try:
+            await hub.command(device.id, "fan", {"on": True})
+            check(False, "offline command without queue must fail")
+        except CommandError:
+            check(True, "offline command without queue fails")
+        await hub.command(device.id, "fan", {"on": True}, queue=True)
+        await hub.command(device.id, "fan", {"level": 60}, queue=True)
+        check(hub.pending["sf-1"]["fan"]["patch"] == {"on": True, "level": 60}, "changes merged while offline")
+        check(hub.device_payload(device)["pending"]["fan"]["patch"]["level"] == 60, "pending in payload")
+        check(not adapter.sent, "nothing sent while offline")
+        stored = await db.get_setting("pending_commands")
+        check(stored["sf-1"]["fan"]["patch"]["on"] is True, "pending stored")
+        # the device comes back
+        back = Device(id="sf-1", vendor="spiderfarmer", native_id="1", model="GGS", kind="controller",
+                      name="Lüfter", online=True)
+        back.controls["fan"] = Control(id="fan", type="exhaust_fan", label="Abluft", on=False, level=0,
+                                       features=["on_off", "level"])
+        hub.update_device(back)
+        await asyncio.sleep(2.5)
+        check(adapter.sent == [("fan", {"on": True, "level": 60})], f"delivered on reconnect: {adapter.sent}")
+        check(not hub.pending and back.controls["fan"].level == 60, "queue empty after delivery")
+        # cancel
+        back.online = False
+        await hub.command(back.id, "fan", {"on": False}, queue=True)
+        await hub.cancel_pending(back.id, "fan")
+        check(not hub.pending, "pending cancelled")
+        back.online = True
+
+        # manual mode stops rules
+        engine = AutomationEngine(hub, TZ)
+        await engine.start()
+        await engine.save_rule({"name": "Immer an", "enabled": True,
+                                "trigger": {"type": "schedule", "start": "00:00", "end": "00:00"},
+                                "target": {"device_id": "sf-1", "control_id": "fan"},
+                                "active_action": {"on": False}})
+        status = await hub.set_override(True, 30)
+        check(status["active"] and status["until"] > time.time() + 1700, "override with end time")
+        adapter.sent.clear()
+        await engine.evaluate()
+        check(not adapter.sent, f"rules pause in manual mode: {adapter.sent}")
+        await hub.set_override(False)
+        check(not hub.override_status()["active"], "override off")
+        await engine.evaluate()
+        check(adapter.sent == [("fan", {"on": False})], f"rules take over again: {adapter.sent}")
+        await hub.set_override(True)
+        hub.override["until"] = time.time() - 1
+        check(not hub.override_active(), "override expires")
+        await engine.stop()
+        await hub.stop()
+        await db.close()
+
+
 async def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         env = Env()
@@ -451,6 +535,7 @@ async def main() -> None:
         finally:
             await env.close()
     await test_vivosun_plugs()
+    await test_offline_queue_and_override()
     print(f"features: {ok} checks ok")
 
 

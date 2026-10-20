@@ -62,8 +62,9 @@ CHECK_GROUPS = ("vor", "beim", "nach")
 PHASES = ("seed", "veg", "flower")
 MEDIA = ("erde", "kokos", "hydro")
 ENTRY_TYPES = ("feed", "water", "flush", "note")
-PLAN_KEYS = ("phase", "week", "vegWeeks", "floWeeks", "sched", "strength", "liters", "tent", "vegStart",
-             "floStart", "dim", "tAir", "rh", "leafOff", "medium", "plants", "hidden", "envOv", "lamp", "luxIn")
+PLAN_KEYS = ("phase", "week", "vegWeeks", "floWeeks", "sched", "strength", "liters", "tent", "seedStart",
+             "vegStart", "floStart", "harvestDate", "dim", "tAir", "rh", "leafOff", "medium", "plants", "hidden",
+             "envOv", "lamp", "luxIn")
 LIBRARY_KEYS = ("custom", "ovr", "check", "checkCustom", "checkOff")
 MAX_PLANS = 40
 MAX_LOG = 5000
@@ -144,7 +145,8 @@ def new_plant(name: Any, plant_id: str | None = None) -> dict[str, Any]:
 def default_plan() -> dict[str, Any]:
     return {
         "phase": "veg", "week": 1, "vegWeeks": 4, "floWeeks": 8, "sched": DEFAULT_SCHED, "strength": 100,
-        "liters": 5, "tent": 0.81, "vegStart": "", "floStart": "", "dim": 100, "tAir": 24, "rh": 55,
+        "liters": 5, "tent": 0.81, "seedStart": "", "vegStart": "", "floStart": "", "harvestDate": "", "dim": 100,
+        "tAir": 24, "rh": 55,
         "leafOff": 2, "medium": "erde", "plants": [new_plant(f"Pflanze {i}", f"p{i}") for i in (1, 2, 3)],
         "hidden": {}, "envOv": {}, "lamp": dict(LAMP_DEFAULT), "luxIn": "",
     }
@@ -247,8 +249,10 @@ def sanitize_plan(raw: Any) -> dict[str, Any]:
     plan["liters"] = liters if liters is not None and 0 < liters <= 500 else 5
     tent = _num(src.get("tent"), 0.1, 20)
     plan["tent"] = _round(tent, 2) if tent is not None else 0.81
+    plan["seedStart"] = _iso(src.get("seedStart"))
     plan["vegStart"] = _iso(src.get("vegStart"))
     plan["floStart"] = _iso(src.get("floStart"))
+    plan["harvestDate"] = _iso(src.get("harvestDate"))
     plan["dim"] = _int(src.get("dim"), 10, 100, 100)
     t_air = _num(src.get("tAir"))
     plan["tAir"] = t_air if t_air is not None and -10 < t_air < 50 else 24
@@ -513,11 +517,23 @@ def auto_position(plan: dict[str, Any], today: date) -> tuple[str, int] | None:
     """Phase and week from the start dates, like Growplan does when the app opens."""
     flower = _date(plan.get("floStart"))
     veg = _date(plan.get("vegStart"))
+    seed = _date(plan.get("seedStart"))
     if flower and today >= flower:
         return "flower", max(1, min(plan["floWeeks"], (today - flower).days // 7 + 1))
     if veg and today >= veg:
         return "veg", max(1, min(plan["vegWeeks"], (today - veg).days // 7 + 1))
+    if seed and today >= seed:
+        return "seed", max(1, min(2, (today - seed).days // 7 + 1))
     return None
+
+
+def harvest_date(plan: dict[str, Any]) -> date | None:
+    """Planned harvest: the date set for it, otherwise the end of the bloom weeks."""
+    own = _date(plan.get("harvestDate"))
+    if own:
+        return own
+    flower = _date(plan.get("floStart"))
+    return flower + timedelta(days=plan["floWeeks"] * 7) if flower else None
 
 
 def current_position(plan: dict[str, Any], today: date) -> dict[str, Any]:
@@ -553,7 +569,7 @@ def svp(temp_c: float) -> float:
 def plan_status(plan: dict[str, Any], today: date, last: dict[str, Any] | None = None) -> dict[str, Any]:
     pos = current_position(plan, today)
     key = stage_key(pos["phase"], pos["week"], plan["floWeeks"])
-    flower = _date(plan.get("floStart"))
+    harvest = harvest_date(plan)
     if pos["phase"] == "seed":
         max_week = 2
     else:
@@ -564,7 +580,7 @@ def plan_status(plan: dict[str, Any], today: date, last: dict[str, Any] | None =
         "stage": key,
         "stage_name": ENV[key]["n"],
         "env": env_of(plan, key),
-        "harvest": (flower + timedelta(days=plan["floWeeks"] * 7)).isoformat() if flower else None,
+        "harvest": harvest.isoformat() if harvest else None,
         "last_watering": ({"date": last["date"], "type": last.get("type"), "liters": last.get("liters")}
                           if last else None),
     }
@@ -640,7 +656,8 @@ def plan_bands(plan: dict[str, Any], today: date) -> dict[str, Any]:
 def plan_for_next_grow(plan: dict[str, Any]) -> dict[str, Any]:
     """The plan after a harvest: schedule, lamp, tent and climate settings stay, the grow starts over."""
     fresh = copy.deepcopy(plan)
-    fresh.update({"phase": "seed", "week": 1, "vegStart": "", "floStart": "", "luxIn": ""})
+    fresh.update({"phase": "seed", "week": 1, "seedStart": "", "vegStart": "", "floStart": "", "harvestDate": "",
+                  "luxIn": ""})
     fresh["plants"] = [{**p, "start": "", "note": "", "gone": False} for p in plan.get("plants", []) if not p.get("gone")]
     for plant in fresh["plants"]:
         plant.pop("gone", None)

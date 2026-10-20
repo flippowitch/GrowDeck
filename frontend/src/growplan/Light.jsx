@@ -131,7 +131,7 @@ function Dimmer({ g, e, recommended }) {
                     {x.control.on === false ? t('aus') : pct != null ? t('jetzt {pct} %', { pct }) : t('an')}
                     {lock ? <span className="muted"> · {lock.text}</span> : null}
                   </span>
-                  <button type="button" className="btn small" disabled={!x.device.online || busy === key || pct === plan.dim || !!lock} onClick={() => apply(x)}>
+                  <button type="button" className="btn small" disabled={busy === key || pct === plan.dim || !!lock} onClick={() => apply(x)}>
                     {pct === plan.dim ? t('steht auf {pct} %', { pct: plan.dim }) : lock ? t('gesperrt') : t('Auf {pct} % stellen', { pct: plan.dim })}
                   </button>
                 </div>

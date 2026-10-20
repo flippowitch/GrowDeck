@@ -17,6 +17,17 @@ const devices = new Map(clone(DATA.state.devices).map((d) => [d.id, d]))
 let rooms = clone(DATA.state.rooms)
 let rules = clone(DATA.rules.rules)
 const automation = clone(DATA.rules.status || DATA.state.automation)
+// manual mode: rules and tent controls switch nothing until it ends
+let override = { active: false, since: null, until: null }
+const overrideActive = () => override.active && (override.until == null || nowS() < override.until)
+function overrideStatus() {
+  if (override.active && !overrideActive()) {
+    override = { active: false, since: null, until: null }
+    addEvent('info', 'automation', 'Handbetrieb beendet, die Automatik übernimmt wieder.')
+    broadcast('override', override)
+  }
+  return { ...override }
+}
 let alarms = clone(DATA.alarms.alarms)
 const alarmStates = {}
 const settings = clone(DATA.state.settings)
@@ -458,7 +469,7 @@ function evaluateRoom(room, stored) {
     const key = `${o.device_id}|${o.control_id}`
     const mem = rcMemory[key] || (rcMemory[key] = { ts: 0 })
     mem.want_on = patch.on
-    if (!cfg.enabled || !d.online) return
+    if (!cfg.enabled || !d.online || overrideActive()) return
     const onDiffers = c.on != null && !!c.on !== !!patch.on
     const levelDiffers = patch.on && patch.level != null && c.level != null && Math.abs(c.level - patch.level) >= (c.level_step || 1)
     if (!onDiffers && !levelDiffers) return
@@ -481,7 +492,7 @@ function evaluateRoom(room, stored) {
 function statusAll() {
   const out = {}
   for (const [id, cfg] of Object.entries(roomConfigs)) {
-    out[id] = { ...(roomStatus[id] || { outputs: [], message: 'Wird ausgewertet …' }), enabled: !!cfg.enabled }
+    out[id] = { ...(roomStatus[id] || { outputs: [], message: 'Wird ausgewertet …' }), enabled: !!cfg.enabled, paused: !!cfg.enabled && overrideActive() }
   }
   return out
 }
@@ -718,7 +729,7 @@ function evaluate() {
     }
     if (active !== status.active) status.since = t
     Object.assign(status, { active: rule.enabled === false ? null : active, value, last_eval: t })
-    if (rule.enabled === false || active == null || !automation.enabled) continue
+    if (rule.enabled === false || active == null || !automation.enabled || overrideActive()) continue
     const target = rule.target || {}
     const key = `${target.device_id}|${target.control_id}`
     const action = active ? rule.active_action : rule.inactive_action
@@ -751,6 +762,7 @@ function tick() {
   const changed = []
   for (const d of devices.values()) {
     if (!d.online) continue
+    if (d.pending && Object.keys(d.pending).length) deliverPending(d)
     const temps = {}
     for (const s of d.sensors) {
       const base = baseline.get(`${d.id}|${s.key}`)
@@ -781,9 +793,38 @@ function logControl(d, c, source = 'user') {
   controlLog.push({ ts: Math.round(nowS()), device_id: d.id, control_id: c.id, on_state: c.on ? 1 : 0, level: c.level, source })
 }
 
-function command(d, c, patch, source = 'user') {
-  if (!d.online) fail(400, `${d.name} ist offline.`)
+// Changes for a device that is offline are kept and sent when it reports again.
+function queueCommand(d, c, patch) {
+  const entry = d.pending?.[c.id] || { patch: {} }
+  const merged = { ...entry.patch, ...patch }
+  if (patch.on === false) delete merged.level
+  d.pending = { ...(d.pending || {}), [c.id]: { patch: merged, ts: nowS() } }
+  broadcast('devices', [d])
+  return { ...c, pending: d.pending[c.id] }
+}
+
+function deliverPending(d) {
+  for (const [cid, entry] of Object.entries(d.pending || {})) {
+    const c = d.controls.find((x) => x.id === cid)
+    if (c) {
+      try {
+        command(d, c, entry.patch)
+        addEvent('info', 'device', `Gespeicherte Änderung für ${c.label} an ${d.name} übertragen.`, d.id)
+      } catch {
+        /* dropped */
+      }
+    }
+  }
+  d.pending = {}
+  broadcast('devices', [d])
+}
+
+function command(d, c, patch, source = 'user', queue = false) {
   if (!c.features?.length) fail(400, 'Dieser Ausgang lässt sich nicht steuern.')
+  if (!d.online) {
+    if (queue) return queueCommand(d, c, patch)
+    fail(400, `${d.name} ist offline.`)
+  }
   if (patch.mode != null) setMode(c, String(patch.mode))
   if (patch.option != null) c.value = String(patch.option)
   if (patch.level != null) c.level = Number(patch.level)
@@ -1104,7 +1145,7 @@ async function route(method, url, body) {
   switch (a) {
     case 'state':
       return {
-        devices: [...devices.values()], rooms, integrations, settings: settingsPayload(), automation, room_control: statusAll(), growplans: growplans(),
+        devices: [...devices.values()], rooms, integrations, settings: settingsPayload(), automation, room_control: statusAll(), override: overrideStatus(), growplans: growplans(),
         watering: wateringPayload(), alarms: alarmStatus(), unread_events: store.events.filter((e) => !e.acknowledged && ['warning', 'alarm'].includes(e.level)).length,
         server_time: t, version,
       }
@@ -1133,7 +1174,17 @@ async function route(method, url, body) {
           broadcast('devices', [dev])
           return { ok: true }
         }
-        return command(dev, control, body || {})
+        return command(dev, control, body || {}, 'user', true)
+      }
+      if (c === 'pending') {
+        const cid = q.get('control_id')
+        if (cid) {
+          const rest = { ...(dev.pending || {}) }
+          delete rest[cid]
+          dev.pending = rest
+        } else dev.pending = {}
+        broadcast('devices', [dev])
+        return { ok: true, pending: dev.pending }
       }
       if (c === 'native') return native(dev, body || {})
       if (c === 'refresh') return { ok: true }
@@ -1225,6 +1276,21 @@ async function route(method, url, body) {
         return { ok: true }
       }
       break
+    }
+    case 'override': {
+      if (method === 'GET') return overrideStatus()
+      const was = overrideActive()
+      if (body?.active) {
+        const minutes = Number(body.minutes) || null
+        override = { active: true, since: was ? override.since : t, until: minutes ? t + minutes * 60 : null }
+        if (!was) addEvent('info', 'automation', minutes ? `Handbetrieb für ${minutes} Minuten eingeschaltet: Regeln und Zeltsteuerung schalten in der Zeit nichts.` : 'Handbetrieb eingeschaltet: Regeln und Zeltsteuerung schalten nichts, bis du ihn beendest.')
+      } else {
+        override = { active: false, since: null, until: null }
+        if (was) addEvent('info', 'automation', 'Handbetrieb beendet, die Automatik übernimmt wieder.')
+      }
+      broadcast('override', overrideStatus())
+      broadcast('room_control', statusAll())
+      return overrideStatus()
     }
     case 'automation':
       automation.enabled = !!body.enabled
@@ -1342,7 +1408,7 @@ setInterval(() => {
   ticks += 1
   if (ticks % 10 === 0) {
     if (integrations.spiderfarmer) integrations.spiderfarmer.messages_in = (integrations.spiderfarmer.messages_in || 0) + 24
-    broadcast('ping', { automation, room_control: statusAll(), alarms: alarmStatus(), integrations, server_time: nowS() })
+    broadcast('ping', { automation, room_control: statusAll(), override: overrideStatus(), alarms: alarmStatus(), integrations, server_time: nowS() })
   }
 }, 2500)
 

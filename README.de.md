@@ -199,13 +199,16 @@ speichert sie in GrowDeck statt nur auf dem Handy. Jedes Zelt bekommt einen eige
 Plan; ohne angelegten Raum gibt es einen Plan für alle Geräte, den du später einem
 Zelt zuordnen kannst.
 
-- **Heute:** Woche und Phase (automatisch aus „Start Wachstum“ und „Umstellung 12/12“,
-  sonst per Pfeil), Sollwerte der Woche für PPFD, Dimmer, Temperatur, Luftfeuchte,
+- **Heute:** Woche und Phase (automatisch aus den Daten im Zeitplan, sonst per Pfeil), Sollwerte der Woche für PPFD, Dimmer, Temperatur, Luftfeuchte,
   VPD, pH, Lichtstunden und DLI – jeweils mit dem Messwert aus dem Zelt daneben
   (grün im Ziel, orange knapp daneben, rot deutlich daneben). „Kanne mischen“
   rechnet die Düngermengen für Wassermenge und Dosierstärke aus und trägt sie als
   Gießung ein. Dazu die Sicherheits-Checkliste (setzt sich täglich zurück, eigene
   Punkte möglich), bis zu 12 Pflanzen mit Sorte, Typ, Topf und Alter sowie das Setup.
+- **Zeitplan:** ein eigenes Datum für jede Phase – Anzucht, Wachstum, Blüte (12/12) und
+  Ernte – mit Zeitleiste. Änderst du ein Datum, rücken die späteren Phasen auf Wunsch mit;
+  der ganze Plan lässt sich um Tage verschieben, jede Phase per Knopf „heute“ starten und
+  die Ernte auf ein eigenes Datum legen (die Blütewochen ergeben sich daraus).
 - **Dünger:** alle Schemata der App (Advanced Nutrients Sensi, Coco und Connoisseur
   jeweils Top-Shelf und Master, BioBizz Light-Mix und All-Mix, Advanced Hydroponics)
   plus eigene Schemata. Werte, Produkte, Farben, Ziel-EC, Kommentare je Woche und
@@ -367,7 +370,13 @@ wenigen Sekunden wieder da). Eine heruntergeladene Sicherung lässt sich über
   AC Infinity „An“ oder „Aus“) steht, also einen Zeitplan, Zyklus oder eine
   Automatik abarbeitet, oder solange die Zeltsteuerung die Stufe regelt. Neben dem
   Regler steht, warum er gesperrt ist; nach dem Umstellen des Modus lässt er sich
-  wieder bewegen. Dasselbe gilt für „Auf … % stellen“ im Growplan unter Licht. Bei Spider Farmer „Zeitplan und Zyklus“,
+  wieder bewegen – mit „Jetzt umstellen“ direkt neben dem Regler. Dasselbe gilt für „Auf … % stellen“ im Growplan unter Licht.
+  Ist ein Gerät ausgeschaltet oder offline, lassen sich seine Ausgänge trotzdem
+  einstellen: GrowDeck merkt sich die Änderung und überträgt sie, sobald das Gerät
+  wieder Daten sendet (verwerfen jederzeit möglich).
+- **Handbetrieb:** ein Knopf (Übersicht, Regeln, Seitenleiste) hält alle Regeln und die
+  Zeltsteuerung an – für 30 Minuten bis „bis ich ihn beende“. Alle Ausgänge behalten
+  dann, was du von Hand einstellst; danach übernimmt die Automatik wieder. Bei Spider Farmer „Zeitplan und Zyklus“,
   „Modus einrichten“ (Steckdosen) und „Klimaziele“; diese Einstellungen werden auf
   dem Gerät gespeichert und laufen auch ohne GrowDeck. Bei Vivosun die
   Automatik-Grenzen der Abluft, Zielwerte und Programme.

@@ -225,7 +225,8 @@ export default function DeviceDetail({ id }) {
             ? t('Keine Daten vom Gerät. Prüfe, ob es mit dem WLAN verbunden ist und sein Datenverkehr über den Proxy auf der NAS läuft.')
             : device.vendor === 'acinfinity'
               ? t('Der Controller meldet sich nicht in der AC-Infinity-Cloud. Prüfe sein WLAN in der AC-Infinity-App und die Verbindung unter Optionen.')
-              : t('Keine Daten aus der Vivosun-Cloud. Prüfe das Gerät in der Vivosun-App und die Verbindung unter Optionen.')}
+              : t('Keine Daten aus der Vivosun-Cloud. Prüfe das Gerät in der Vivosun-App und die Verbindung unter Optionen.')}{' '}
+          {t('Du kannst die Ausgänge trotzdem einstellen: GrowDeck merkt sich die Änderungen und überträgt sie, sobald das Gerät wieder eingeschaltet ist und Daten sendet.')}
         </div>
       ) : null}
 

@@ -259,7 +259,7 @@ class ArchiveService:
 
     def _started(self, plan: dict[str, Any], log: list[dict[str, Any]], record: dict[str, Any],
                  harvested: date) -> date:
-        candidates = [_date(plan.get("vegStart"))]
+        candidates = [_date(plan.get("seedStart")), _date(plan.get("vegStart"))]
         candidates += [_date(p.get("start")) for p in plan.get("plants", [])]
         candidates += [_date(e.get("date")) for e in log]
         found = [d for d in candidates if d is not None and d <= harvested]

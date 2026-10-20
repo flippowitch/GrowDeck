@@ -102,6 +102,7 @@ class AutomationEngine:
         self._wake = asyncio.Event()
         # set by the app: outputs driven by a room control -> room id
         self.managed = None
+        self._paused = False
 
     async def start(self) -> None:
         await self.reload()
@@ -127,6 +128,9 @@ class AutomationEngine:
         if enabled:
             self._sent.clear()
             self._wake.set()
+
+    def wake(self) -> None:
+        self._wake.set()
 
     # -------------------------------------------------------------------- crud
     async def save_rule(self, rule: dict[str, Any]) -> dict[str, Any]:
@@ -311,8 +315,14 @@ class AutomationEngine:
             if action:
                 desired[(target.get("device_id"), target.get("control_id"))] = (action, rule)
 
-        if not self.enabled:
+        if not self.enabled or self.hub.override_active():
+            self._paused = True
             return
+        if self._paused:
+            # back from a pause or manual mode: bring every output to what the rules want
+            self._paused = False
+            self._sent.clear()
+            self._mismatch_since.clear()
         managed = self.managed() if self.managed else {}
 
         for key, (action, rule) in desired.items():

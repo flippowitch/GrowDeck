@@ -17,6 +17,7 @@ let state = {
   events: [],
   unread: 0,
   roomControl: {},
+  override: { active: false, since: null, until: null }, // manual mode: rules and tent controls pause
   growplans: [], // plan summaries (settings + status), one per tent
   growplanLibrary: null, // own schedules, adjusted schedules, checklist (loaded by the Growplan page)
   watering: { settings: {}, suggestions: {} }, // reminders and recognised waterings per plan
@@ -132,6 +133,7 @@ export async function loadState() {
     settings: data.settings,
     automation: data.automation,
     roomControl: data.room_control || {},
+    override: data.override || { active: false },
     growplans: data.growplans || [],
     watering: data.watering || { settings: {}, suggestions: {} },
     alarmStatus: data.alarms,
@@ -162,19 +164,67 @@ export async function logout() {
 }
 
 // ----------------------------------------------------------------- commands
+// Changes for a device that is offline (switched off, unplugged) are kept by the server and
+// sent as soon as it reports again; the answer then carries them as `pending`.
 export async function sendCommand(deviceId, controlId, patch) {
-  const control = await api(`/devices/${deviceId}/controls/${encodeURIComponent(controlId)}`, {
+  const answer = await api(`/devices/${deviceId}/controls/${encodeURIComponent(controlId)}`, {
     method: 'POST',
     body: patch,
   })
+  const { pending, ...control } = answer
   // Merge the returned control right away; the websocket confirms shortly after.
   setState((s) => {
     const device = s.devices[deviceId]
     if (!device) return {}
     const controls = device.controls.map((c) => (c.id === control.id ? control : c))
-    return { devices: { ...s.devices, [deviceId]: { ...device, controls } } }
+    const queued = { ...(device.pending || {}) }
+    if (pending) queued[control.id] = pending
+    else delete queued[control.id]
+    return { devices: { ...s.devices, [deviceId]: { ...device, controls, pending: queued } } }
   })
+  if (pending) {
+    const name = getState().devices[deviceId]?.name || ''
+    toast(t('{name} ist offline. Die Änderung wird übertragen, sobald das Gerät wieder Daten sendet.', { name }), 'warn', 6000)
+  }
   return control
+}
+
+export async function cancelPending(deviceId, controlId) {
+  const query = controlId ? `?control_id=${encodeURIComponent(controlId)}` : ''
+  const r = await api(`/devices/${deviceId}/pending${query}`, { method: 'DELETE' })
+  setState((s) => {
+    const device = s.devices[deviceId]
+    return device ? { devices: { ...s.devices, [deviceId]: { ...device, pending: r.pending } } } : {}
+  })
+}
+
+// The display of a control with the changes still waiting for the device.
+export function withPending(device, control) {
+  const queued = device.pending?.[control.id]?.patch
+  if (!queued) return control
+  const view = { ...control, extra: { ...(control.extra || {}) } }
+  for (const [key, value] of Object.entries(queued)) {
+    if (key === 'option') view.value = value
+    else if (key in control && key !== 'extra') view[key] = value
+    else view.extra[key] = value
+  }
+  if (queued.mode != null) view.mode_label = control.modes?.find((m) => m.key === queued.mode)?.label || view.mode_label
+  return view
+}
+
+// Manual mode: rules and tent controls stop switching until it ends.
+function applyOverride(s, override) {
+  const roomControl = {}
+  for (const [id, status] of Object.entries(s.roomControl || {})) {
+    roomControl[id] = { ...status, paused: !!(status.enabled && override.active) }
+  }
+  return { override, roomControl }
+}
+
+export async function setOverride(active, minutes = null) {
+  const override = await api('/override', { method: 'POST', body: { active, minutes } })
+  setState((s) => applyOverride(s, override))
+  return override
 }
 
 // ------------------------------------------------------------------ websocket
@@ -233,6 +283,7 @@ function handleMessage(msg) {
       devices, rooms: data.rooms, serverOffset: data.server_time * 1000 - Date.now(),
       ...(data.growplans ? { growplans: data.growplans } : {}),
       ...(data.watering ? { watering: data.watering } : {}),
+      ...(data.override ? { override: data.override } : {}),
     })
   } else if (type === 'devices') {
     setState((s) => {
@@ -248,6 +299,8 @@ function handleMessage(msg) {
     })
   } else if (type === 'rooms') {
     setState({ rooms: data })
+  } else if (type === 'override') {
+    setState((s) => applyOverride(s, data))
   } else if (type === 'room_control') {
     setState({ roomControl: data })
   } else if (type === 'growplan') {
@@ -273,6 +326,7 @@ function handleMessage(msg) {
     setState({
       automation: data.automation,
       roomControl: data.room_control || {},
+      ...(data.override ? { override: data.override } : {}),
       alarmStatus: data.alarms,
       integrations: data.integrations,
       serverOffset: data.server_time * 1000 - Date.now(),

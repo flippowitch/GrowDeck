@@ -17,6 +17,9 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_STALE_AFTER = 180  # seconds without data before a device counts as offline
 COMMAND_ECHO_WINDOW = 20  # device-reported changes this soon after a command are its echo
+PENDING_MAX_AGE = 7 * 86400  # queued changes for an offline device are dropped after a week
+PENDING_KEY = "pending_commands"
+OVERRIDE_KEY = "manual_override"
 
 
 class CommandError(Exception):
@@ -36,11 +39,23 @@ class Hub:
         self._known_ids: set[str] = set()
         self._reconciled: set[tuple[str, str]] = set()
         self._reported_offline: set[str] = set()
+        # changes for devices that are offline (switched off, unplugged): device -> control -> entry
+        self.pending: dict[str, dict[str, dict[str, Any]]] = {}
+        self._delivering: set[str] = set()
+        # manual mode: rules and tent controls stop switching, every output is set by hand
+        self.override: dict[str, Any] = {"active": False, "since": None, "until": None}
+        self.on_override: list[Any] = []
 
     # ---------------------------------------------------------------- lifecycle
     async def start(self) -> None:
         self.meta = await self.db.all_device_meta()
         self._known_ids = set(self.meta)
+        stored = await self.db.get_setting(PENDING_KEY, {})
+        if isinstance(stored, dict):
+            self.pending = {d: c for d, c in stored.items() if isinstance(c, dict) and c}
+        override = await self.db.get_setting(OVERRIDE_KEY, None)
+        if isinstance(override, dict) and override.get("active"):
+            self.override = {"active": True, "since": override.get("since"), "until": override.get("until")}
         self._tasks.append(asyncio.create_task(self._flush_loop(), name="hub-flush"))
         self._tasks.append(asyncio.create_task(self._offline_sweep_loop(), name="hub-offline"))
         for adapter in self.adapters.values():
@@ -75,6 +90,8 @@ class Hub:
         self._reconcile_first_states(device)
         self.devices[device.id] = device
         self._dirty.add(device.id)
+        if device.online and device.id in self.pending:
+            self._schedule_delivery(device.id)
         if device.online and device.id in self._reported_offline:
             self._reported_offline.discard(device.id)
             asyncio.get_running_loop().create_task(
@@ -209,10 +226,10 @@ class Hub:
         return device, control
 
     async def command(self, device_id: str, control_id: str, patch: dict[str, Any],
-                      source: str = "user") -> Control:
+                      source: str = "user", queue: bool = False) -> Control:
+        """Send a change to an output. With `queue`, a change for a device that is offline
+        (switched off, unplugged, out of Wi-Fi) is kept and sent as soon as it reports again."""
         device, control = self.get_control(device_id, control_id)
-        if not device.online:
-            raise CommandError(f"{device.name} ist offline.")
         patch = {k: v for k, v in patch.items() if v is not None}
         if not patch:
             raise CommandError("Keine Änderung angegeben.")
@@ -220,6 +237,11 @@ class Hub:
         adapter = self.adapters.get(device.vendor)
         if adapter is None:
             raise CommandError("Für diesen Hersteller ist keine Verbindung aktiv.")
+        if not device.online:
+            if not queue:
+                raise CommandError(f"{device.name} ist offline.")
+            await self._queue(device, control, patch)
+            return control
         before = copy.deepcopy(control)
         self._last_command[(device_id, control_id)] = time.time()
         try:
@@ -228,10 +250,112 @@ class Hub:
             raise CommandError(str(err)) from err
         current = self.devices.get(device_id, device).controls.get(control_id, control)
         self._dirty.add(device_id)
+        if source == "user":
+            await self._drop_pending(device_id, control_id, set(patch))
         if before.on != current.on or before.level != current.level or "on" in patch or "level" in patch:
             await self.db.insert_control_log(int(time.time()), device_id, control_id,
                                              current.on, current.level, source)
         return current
+
+    # ------------------------------------------------- changes for offline devices
+    async def _queue(self, device: Device, control: Control, patch: dict[str, Any]) -> None:
+        controls = self.pending.setdefault(device.id, {})
+        entry = controls.get(control.id) or {"patch": {}}
+        merged = {**entry["patch"], **patch}
+        if patch.get("on") is False:
+            # switched off: a level queued before no longer matters
+            merged.pop("level", None)
+        controls[control.id] = {"patch": merged, "ts": time.time()}
+        self._dirty.add(device.id)
+        await self._save_pending()
+
+    async def _drop_pending(self, device_id: str, control_id: str, keys: set[str] | None = None) -> None:
+        controls = self.pending.get(device_id)
+        entry = controls.get(control_id) if controls else None
+        if entry is None:
+            return
+        if keys is not None:
+            entry["patch"] = {k: v for k, v in entry["patch"].items() if k not in keys}
+        if keys is None or not entry["patch"]:
+            controls.pop(control_id, None)
+        if not controls:
+            self.pending.pop(device_id, None)
+        self._dirty.add(device_id)
+        await self._save_pending()
+
+    async def cancel_pending(self, device_id: str, control_id: str | None = None) -> None:
+        if control_id is None:
+            if self.pending.pop(device_id, None) is not None:
+                self._dirty.add(device_id)
+                await self._save_pending()
+            return
+        await self._drop_pending(device_id, control_id)
+
+    async def _save_pending(self) -> None:
+        await self.db.set_setting(PENDING_KEY, self.pending)
+
+    def _schedule_delivery(self, device_id: str) -> None:
+        if device_id in self._delivering:
+            return
+        self._delivering.add(device_id)
+        asyncio.get_running_loop().create_task(self._deliver_pending(device_id))
+
+    async def _deliver_pending(self, device_id: str) -> None:
+        try:
+            await asyncio.sleep(2)  # let the device settle after reconnecting
+            device = self.devices.get(device_id)
+            controls = self.pending.get(device_id)
+            if device is None or not device.online or not controls:
+                return
+            for control_id, entry in list(controls.items()):
+                control = device.controls.get(control_id)
+                if control is None:
+                    await self._drop_pending(device_id, control_id)
+                    continue
+                patch = dict(entry["patch"])
+                try:
+                    await self.command(device_id, control_id, patch, source="user")
+                except CommandError as err:
+                    if not self.devices.get(device_id, device).online:
+                        return  # gone again: keep the rest for the next time
+                    await self._drop_pending(device_id, control_id)
+                    await self.add_event("warning", "device",
+                                         f"Gespeicherte Änderung für {control.label} an {device.name} "
+                                         f"ließ sich nicht übertragen: {err}", device_id)
+                    continue
+                await self._drop_pending(device_id, control_id)
+                await self.add_event("info", "device",
+                                     f"Gespeicherte Änderung für {control.label} an {device.name} übertragen.",
+                                     device_id, {"patch": patch})
+        except Exception:  # noqa: BLE001 - try again on the next sweep
+            _LOGGER.exception("Could not deliver queued changes for %s", device_id)
+        finally:
+            self._delivering.discard(device_id)
+
+    # ----------------------------------------------------------------- manual mode
+    def override_active(self) -> bool:
+        if not self.override.get("active"):
+            return False
+        until = self.override.get("until")
+        return until is None or time.time() < float(until)
+
+    def override_status(self) -> dict[str, Any]:
+        return {**self.override, "active": self.override_active()}
+
+    async def set_override(self, active: bool, minutes: float | None = None) -> dict[str, Any]:
+        """Manual mode on (for `minutes` or until switched off) or off."""
+        now = time.time()
+        if active:
+            until = now + float(minutes) * 60 if minutes else None
+            self.override = {"active": True, "since": self.override.get("since") if self.override_active() else now,
+                             "until": until}
+        else:
+            self.override = {"active": False, "since": None, "until": None}
+        await self.db.set_setting(OVERRIDE_KEY, self.override)
+        self.bus.publish("override", self.override_status())
+        for callback in self.on_override:
+            callback()
+        return self.override_status()
 
     @staticmethod
     def _validate_patch(control: Control, patch: dict[str, Any]) -> None:
@@ -284,10 +408,18 @@ class Hub:
 
     # -------------------------------------------------------------- serializing
     def device_payload(self, device: Device, *, include_raw: bool = False) -> dict[str, Any]:
-        return device.to_dict(include_raw=include_raw)
+        data = device.to_dict(include_raw=include_raw)
+        data["pending"] = self.pending.get(device.id) or {}
+        return data
 
     def visible_devices(self) -> list[Device]:
         return sorted(self.devices.values(), key=lambda d: (d.vendor, d.name.lower()))
+
+    async def _expire_pending(self, now: float) -> None:
+        for device_id, controls in list(self.pending.items()):
+            for control_id, entry in list(controls.items()):
+                if now - float(entry.get("ts") or 0) > PENDING_MAX_AGE:
+                    await self._drop_pending(device_id, control_id)
 
     # ------------------------------------------------------------------- loops
     async def _flush_loop(self) -> None:
@@ -304,7 +436,13 @@ class Hub:
         while True:
             await asyncio.sleep(15)
             now = time.time()
+            if self.override.get("active") and not self.override_active():
+                await self.set_override(False)
+                await self.add_event("info", "automation", "Handbetrieb beendet, die Automatik übernimmt wieder.")
+            await self._expire_pending(now)
             for device in list(self.devices.values()):
+                if device.online and device.id in self.pending:
+                    self._schedule_delivery(device.id)
                 stale_after = float(device.info.get("stale_after", DEFAULT_STALE_AFTER))
                 if device.online and now - device.last_seen > stale_after:
                     device.online = False

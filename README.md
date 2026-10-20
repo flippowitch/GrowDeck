@@ -61,6 +61,11 @@ your browser with simulated devices; nothing is sent anywhere, and a reload rese
 - **Tent control across brands** – one climate controller per tent that coordinates
   exhaust, circulation, humidifier, dehumidifier, heater, cooling and CO₂ of any brand,
   with day/night targets and the light's real state as day signal.
+- **Manual mode** – one button pauses every rule and tent control (for 30 minutes up to
+  “until I end it”), so every output keeps what you set by hand; afterwards automatic
+  control takes over again.
+- **Offline devices** – outputs of a device that is switched off or out of reach can still be
+  set: GrowDeck keeps the change and sends it as soon as the device reports again.
 - **Rules** – thresholds (with night values and hysteresis), time windows, intervals and
   “when device X is on” couplings between devices of different brands.
 - **Alarms** – limits per sensor, plus alarms that follow the Growplan's targets week by
@@ -273,11 +278,15 @@ control are not switched by rules.
 
 Every tent gets its own plan (without rooms there is one plan for all devices).
 
-- **Today:** week and stage (from “Veg start” and “Switch to 12/12”, or set with the
+- **Today:** week and stage (from the dates in the schedule, or set with the
   arrows), the week's targets for PPFD, dimmer, temperature, humidity, VPD, pH, light hours
   and DLI – each next to the reading from the tent. “Mix a batch” calculates the nutrient
   amounts for volume and strength and logs the watering. Plus safety checklist, up to 12
   plants, setup, the latest camera photo and detected waterings.
+- **Schedule:** its own date for every stage – seedlings, veg, bloom (12/12) and harvest –
+  with a timeline. Change one date and the later stages can move along; shift the whole
+  plan by days, start a stage “today” with one tap, or set your own harvest date (the
+  bloom weeks follow from it).
 - **Nutrients:** schedules for Advanced Nutrients (Sensi, Coco, Connoisseur – Top-Shelf and
   Master), BioBizz (Light-Mix, All-Mix), Advanced Hydroponics and your own. Values,
   products, colours, target EC and notes are editable; the original can be restored.

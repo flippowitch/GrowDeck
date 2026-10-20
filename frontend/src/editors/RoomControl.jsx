@@ -73,6 +73,7 @@ export function RoomControlPanel({ room, status, devices, onEdit }) {
           </span>
         ) : null}
       </p>
+      {status.paused ? <div className="notice" style={{ margin: '0 18px 14px' }}>{t('Handbetrieb aktiv: Die Zeltsteuerung schaltet gerade nichts.')}</div> : null}
       {status.message ? <div className="notice" style={{ margin: '0 18px 14px' }}>{t(status.message)}</div> : null}
       {outputs.length ? (
         <div className="rc-outputs">

@@ -266,6 +266,9 @@ export function autoPosition(plan, today) {
   if (isISO(plan.vegStart) && today >= plan.vegStart) {
     return { phase: 'veg', week: Math.max(1, Math.min(plan.vegWeeks, Math.floor(daysBetween(plan.vegStart, today) / 7) + 1)) }
   }
+  if (isISO(plan.seedStart) && today >= plan.seedStart) {
+    return { phase: 'seed', week: Math.max(1, Math.min(2, Math.floor(daysBetween(plan.seedStart, today) / 7) + 1)) }
+  }
   return null
 }
 export function currentPosition(plan, today) {
@@ -293,7 +296,88 @@ export function stepPosition(pos, dir, plan) {
   }
   return { phase, week }
 }
-export const harvestISO = (plan) => (isISO(plan.floStart) ? addDays(plan.floStart, plan.floWeeks * 7) : '')
+export const harvestISO = (plan) => (isISO(plan.harvestDate) ? plan.harvestDate
+  : isISO(plan.floStart) ? addDays(plan.floStart, plan.floWeeks * 7) : '')
+
+// ------------------------------------------------------- dates per phase
+// Each phase has its own start date; the harvest can have its own date too. Durations
+// follow from the dates where both ends are known, so bloom weeks and the feeding
+// schedule stay in step with the calendar.
+export const PHASE_DATES = ['seedStart', 'vegStart', 'floStart', 'harvestDate']
+const weeksFor = (from, to, lo, hi) => Math.max(lo, Math.min(hi, Math.ceil(daysBetween(from, to) / 7)))
+
+// Durations that follow from the dates (veg weeks between veg and bloom start, bloom
+// weeks between bloom start and harvest).
+export function syncDurations(plan) {
+  const next = { ...plan }
+  if (isISO(next.vegStart) && isISO(next.floStart) && next.floStart > next.vegStart) {
+    next.vegWeeks = weeksFor(next.vegStart, next.floStart, 1, 12)
+  }
+  if (isISO(next.floStart) && isISO(next.harvestDate) && next.harvestDate > next.floStart) {
+    next.floWeeks = weeksFor(next.floStart, next.harvestDate, 4, 16)
+  }
+  return clampWeek(next)
+}
+
+// Set the date of one phase. With `shiftLater` the later phases move by the same number
+// of days, so their lengths stay as they are.
+export function setPhaseDate(plan, key, value, shiftLater = false) {
+  const next = { ...plan, [key]: isISO(value) ? value : '' }
+  const old = plan[key]
+  if (shiftLater && isISO(old) && isISO(value)) {
+    const delta = daysBetween(old, value)
+    for (const later of PHASE_DATES.slice(PHASE_DATES.indexOf(key) + 1)) {
+      if (isISO(next[later])) next[later] = addDays(next[later], delta)
+    }
+  }
+  return syncDurations(next)
+}
+
+// Move every date of the plan by `days` (e.g. the seeds sprouted later than planned).
+export function shiftPlan(plan, days) {
+  const next = { ...plan }
+  for (const key of PHASE_DATES) if (isISO(next[key])) next[key] = addDays(next[key], days)
+  return next
+}
+
+// New length of a phase in weeks. With dates the next phase moves along, as long as it
+// still lies in the future (a phase that already started keeps its date).
+export function setPhaseWeeks(plan, phase, weeks, today) {
+  const next = { ...plan, [phase === 'veg' ? 'vegWeeks' : 'floWeeks']: weeks }
+  if (phase === 'veg' && isISO(next.vegStart) && isISO(next.floStart) && next.floStart > today) {
+    const floStart = addDays(next.vegStart, weeks * 7)
+    if (isISO(next.harvestDate)) next.harvestDate = addDays(next.harvestDate, daysBetween(next.floStart, floStart))
+    next.floStart = floStart
+  }
+  if (phase === 'flower' && isISO(next.floStart) && isISO(next.harvestDate)) {
+    next.harvestDate = addDays(next.floStart, weeks * 7)
+  }
+  return clampWeek(next)
+}
+
+// The phases on the calendar: start and end (exclusive) where known.
+export function phaseTimeline(plan) {
+  const harvest = harvestISO(plan)
+  const vegEnd = isISO(plan.floStart) ? plan.floStart : isISO(plan.vegStart) ? addDays(plan.vegStart, plan.vegWeeks * 7) : ''
+  return [
+    { key: 'seed', field: 'seedStart', start: plan.seedStart || '', end: isISO(plan.vegStart) ? plan.vegStart : isISO(plan.seedStart) ? addDays(plan.seedStart, 14) : '' },
+    { key: 'veg', field: 'vegStart', start: plan.vegStart || '', end: vegEnd },
+    { key: 'flower', field: 'floStart', start: plan.floStart || '', end: harvest },
+  ]
+}
+
+// Dates that are out of order, as a list of readable problems.
+export function dateProblems(plan) {
+  const out = []
+  const order = [['seedStart', t('Anzucht')], ['vegStart', t('Wachstum')], ['floStart', t('Blüte')], ['harvestDate', t('Ernte')]]
+  let prev = null
+  for (const [key, label] of order) {
+    if (!isISO(plan[key])) continue
+    if (prev && plan[key] <= plan[prev[0]]) out.push(t('{later} liegt nicht nach {earlier}.', { later: label, earlier: prev[1] }))
+    prev = [key, label]
+  }
+  return out
+}
 export function harvestLabel(plan) {
   const iso = harvestISO(plan)
   return iso ? dateObj(iso).toLocaleDateString(LOCALE, { day: '2-digit', month: 'short' }) : ''
@@ -413,7 +497,7 @@ export function newPlant(name, id) {
 export function defaultPlan() {
   return {
     phase: 'veg', week: 1, vegWeeks: 4, floWeeks: 8, sched: BUILTIN[0].id, strength: 100, liters: 5, tent: 0.81,
-    vegStart: '', floStart: '', dim: 100, tAir: 24, rh: 55, leafOff: 2, medium: 'erde',
+    seedStart: '', vegStart: '', floStart: '', harvestDate: '', dim: 100, tAir: 24, rh: 55, leafOff: 2, medium: 'erde',
     plants: [1, 2, 3].map((i) => newPlant(t('Pflanze {n}', { n: i }), `p${i}`)), hidden: {}, envOv: {}, lamp: clone(LAMP_DEFAULT), luxIn: '',
   }
 }

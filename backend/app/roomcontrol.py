@@ -472,6 +472,9 @@ class RoomControl:
         mem["want_on"] = patch.get("on")
         if not cfg["enabled"]:
             return entry
+        if self.hub.override_active():
+            entry["paused"] = True
+            return entry
         if not device.online:
             entry["error"] = f"{device.name} ist offline."
             return entry
@@ -519,5 +522,6 @@ class RoomControl:
         result = {}
         for room_id, cfg in self.configs.items():
             status = self.status.get(room_id) or {"enabled": cfg.get("enabled"), "outputs": [], "message": "Wird ausgewertet …"}
-            result[room_id] = {**status, "enabled": bool(cfg.get("enabled"))}
+            result[room_id] = {**status, "enabled": bool(cfg.get("enabled")),
+                               "paused": bool(cfg.get("enabled")) and self.hub.override_active()}
         return result

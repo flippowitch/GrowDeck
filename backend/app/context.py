@@ -112,6 +112,7 @@ class AppContext:
         await self.hub.start()
         await self.automation.start()
         self.automation.managed = self.room_control.managed
+        self.hub.on_override += [self.automation.wake, self.room_control.wake]
         await self.growplan.start()
         self.room_control.plan_targets = self.growplan.targets_for_room
         self.growplan.on_change = self.room_control.wake

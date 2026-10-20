@@ -1,18 +1,18 @@
 // Tab "Heute": targets of the week next to the live values of the tent, the watering
 // can, safety checklist, plants and the setup of the grow.
-import { useState } from 'react'
 import { toast } from '../store.js'
 import { fmt } from '../format.js'
 import { t } from '../i18n.js'
 import { Field, Segmented } from '../components/ui.jsx'
 import { CHECK_GROUPS, MEDIUM_LBL, PHASE_LBL, PLANT_TYPES } from './data.js'
 import {
-  activePlants, agoText, autoPosition, checkDone, checkItems, clampInt, clampWeek, currentSched, daysBetween, dimForPPFD,
+  activePlants, agoText, checkDone, checkItems, currentSched, daysBetween, dimForPPFD,
   dli, envAdj, envOf, f1, fmtDate, hasMissing, klxRange, lastWatering, mid, newPlant, num, phTarget, rng, rngV, shortLamp,
   stageKey, vpdOf,
 } from './engine.js'
 import { Block, Cell, DecimalInput, lightHours, liveText, MixRows, percentOfLevel, Rich } from './parts.jsx'
 import { CameraTile, WateringNotices } from './extras.jsx'
+import PhaseDates from './Dates.jsx'
 
 const TENTS = [['0.36', '60 × 60 cm'], ['0.49', '70 × 70 cm'], ['0.64', '80 × 80 cm'], ['0.81', '90 × 90 cm'],
   ['1.00', '100 × 100 cm'], ['1.20', '100 × 120 cm'], ['1.44', '120 × 120 cm']]
@@ -20,25 +20,6 @@ const TENTS = [['0.36', '60 × 60 cm'], ['0.49', '70 × 70 cm'], ['0.64', '80 ×
 export function tentOptions(tent) {
   const value = Number(tent).toFixed(2)
   return TENTS.some(([v]) => v === value) ? TENTS : [...TENTS, [value, `${num(Number(tent), 2)} m²`]]
-}
-
-// Weeks field that applies its value when left, like the number fields of the app.
-function WeeksInput({ value, min, max, onCommit, label }) {
-  const [text, setText] = useState(String(value))
-  const [shown, setShown] = useState(value)
-  if (shown !== value) {
-    setShown(value)
-    setText(String(value))
-  }
-  const commit = () => {
-    const next = clampInt(text, min, max, value)
-    setText(String(next))
-    if (next !== value) onCommit(next)
-  }
-  return (
-    <input type="number" className="input" min={min} max={max} value={text} aria-label={label}
-      onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} />
-  )
 }
 
 export function liveCells(g, e) {
@@ -218,27 +199,22 @@ function Plants({ g }) {
   )
 }
 
+function Schedule({ g }) {
+  return (
+    <Block title={t('Zeitplan')} hint={t('Datum je Phase')}>
+      <div className="panel gp-pad">
+        <PhaseDates g={g} />
+      </div>
+    </Block>
+  )
+}
+
 function Setup({ g }) {
   const { plan, pos, update } = g
-  const setDate = (key) => (ev) => update((d) => {
-    const next = { ...d, [key]: ev.target.value }
-    const auto = autoPosition(next, g.today)
-    return auto ? { ...next, phase: auto.phase, week: auto.week } : next
-  })
   return (
     <Block title={t('Setup')}>
       <div className="panel gp-pad stack">
         <div className="gp-form2">
-          <Field label={t('Start Wachstum')}><input type="date" className="input" value={plan.vegStart} onChange={setDate('vegStart')} /></Field>
-          <Field label={t('Umstellung 12/12')}><input type="date" className="input" value={plan.floStart} onChange={setDate('floStart')} /></Field>
-        </div>
-        <div className="gp-form3">
-          <Field label={t('Wachstum (Wo.)')}>
-            <WeeksInput label={t('Wachstum in Wochen')} value={plan.vegWeeks} min={1} max={12} onCommit={(vegWeeks) => update((d) => clampWeek({ ...d, vegWeeks }))} />
-          </Field>
-          <Field label={t('Blüte inkl. Spülen')}>
-            <WeeksInput label={t('Blüte in Wochen')} value={plan.floWeeks} min={4} max={16} onCommit={(floWeeks) => update((d) => clampWeek({ ...d, floWeeks }))} />
-          </Field>
           <Field label={t('Fläche')}>
             <select className="input" value={Number(plan.tent).toFixed(2)} onChange={(ev) => update({ tent: parseFloat(ev.target.value) })}>
               {tentOptions(plan.tent).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
@@ -251,13 +227,15 @@ function Setup({ g }) {
             options={Object.entries(MEDIUM_LBL).map(([key, label]) => ({ key, label }))} />
         </div>
         <div className="field">
-          <span>{t('Phase manuell setzen')}</span>
+          <span>{g.current.auto ? t('Phase ansehen') : t('Phase manuell setzen')}</span>
           <Segmented label={t('Phase')} value={pos.phase} onChange={(phase) => g.setPhase(phase)}
             options={[{ key: 'seed', label: t('Sämling') }, { key: 'veg', label: PHASE_LBL.veg }, { key: 'flower', label: PHASE_LBL.flower }]} />
         </div>
-        <p className="small muted" style={{ margin: 0 }}>
-          {t('Mit eingetragenen Daten bestimmt GrowDeck Phase und Woche automatisch – auch für die Übersicht und die Zeltsteuerung. Ohne Daten gilt die Woche, die du oben einstellst. Der Plan liegt in GrowDeck und ist auf allen Geräten gleich.')}
-        </p>
+        {g.current.auto ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            {t('Die Phase folgt den Daten im Zeitplan. Hier springst du nur zur Vorschau; um die Phase wirklich zu wechseln, setze im Zeitplan ihren Start auf „Heute“.')}
+          </p>
+        ) : null}
       </div>
     </Block>
   )
@@ -275,6 +253,7 @@ export default function Today({ g, extra }) {
         <CameraTile g={g} />
         <Checklist g={g} />
         <Plants g={g} />
+        <Schedule g={g} />
         <Setup g={g} />
         {extra}
       </div>

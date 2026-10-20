@@ -30,6 +30,7 @@ async def live(websocket: WebSocket) -> None:
                 "rooms": await ctx.db.list_rooms(),
                 "growplans": ctx.growplan.summaries(),
                 "watering": ctx.watering.payload(),
+                "override": ctx.hub.override_status(),
                 "server_time": time.time(),
             },
         })
@@ -46,6 +47,7 @@ async def live(websocket: WebSocket) -> None:
                     "server_time": time.time(),
                     "automation": ctx.automation.status(),
                     "room_control": ctx.room_control.status_all(),
+                    "override": ctx.hub.override_status(),
                     "alarms": ctx.alarms.status(),
                     "integrations": await ctx.integrations(),
                 }})

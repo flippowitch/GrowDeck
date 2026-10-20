@@ -16,6 +16,12 @@ export function isManual(device, control) {
   return (MANUAL_MODES[device.vendor] || DEFAULT_MANUAL).has(String(control.mode))
 }
 
+// Key of the mode in which the device follows GrowDeck, if it has one.
+export function manualModeKey(device, control) {
+  const key = device.vendor === 'acinfinity' ? '2' : '0'
+  return (control.modes || []).some((m) => m.key === key) ? key : null
+}
+
 // Name of the mode to switch to, in the language of the page.
 export function manualModeLabel(device, control) {
   if (device.vendor === 'acinfinity') {
@@ -26,10 +32,11 @@ export function manualModeLabel(device, control) {
   return label ? t(label) : t('Manuell')
 }
 
-// The enabled room control that has this output assigned, if any.
+// The enabled room control that has this output assigned, if any. In manual mode
+// (`paused`) the room control switches nothing, so it holds no output.
 export function roomControlOf(device, control, roomControl) {
   for (const status of Object.values(roomControl || {})) {
-    if (!status?.enabled) continue
+    if (!status?.enabled || status.paused) continue
     const output = (status.outputs || []).find((o) => o.device_id === device.id && o.control_id === control.id)
     if (output) return { status, output }
   }
@@ -48,6 +55,7 @@ export function sliderLock(device, control, roomControl) {
   if (!isManual(device, control)) {
     return {
       by: 'mode',
+      manual: manualModeKey(device, control),
       text: t('Läuft im Modus „{mode}“. Zum Verstellen auf „{manual}“ umstellen.', {
         mode: control.mode_label ? t(control.mode_label) : t('Automatik'),
         manual: manualModeLabel(device, control),

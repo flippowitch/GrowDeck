@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { checkAuth, login, useStore } from './store.js'
 import { href, useRoute } from './router.js'
 import Icon, { Logo } from './components/Icon.jsx'
+import { OverrideBar, OverrideButton } from './components/Override.jsx'
 import Overview from './pages/Overview.jsx'
 import Growplan from './pages/Growplan.jsx'
 import Devices from './pages/Devices.jsx'
@@ -143,6 +144,7 @@ export default function App() {
           </a>
         ))}
         <div className="rail-foot">
+          <OverrideButton className="btn small rail-override" />
           <span><span className={`live-dot ${connection}`} />{connectionText}</span>
           <span>{t('Version {version}', { version })}</span>
         </div>
@@ -153,6 +155,7 @@ export default function App() {
             {t('Keine Live-Verbindung zu GrowDeck. Die Anzeige wird wieder aktuell, sobald die Verbindung steht.')}
           </div>
         ) : null}
+        <OverrideBar />
         <Page route={route} />
       </main>
       <nav className="tabbar" aria-label={t('Navigation')}>
